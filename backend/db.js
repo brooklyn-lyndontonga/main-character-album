@@ -3,7 +3,11 @@ const path = require('path');
 const fs = require('fs');
 
 // Ensure db directory exists
-const dbPath = path.join(__dirname, 'database.db');
+const dbDir = process.env.DATABASE_DIR || __dirname;
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+const dbPath = path.join(dbDir, 'database.db');
 const db = new Database(dbPath, { verbose: console.log });
 
 // Enable foreign keys

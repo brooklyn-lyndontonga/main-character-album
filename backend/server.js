@@ -24,9 +24,9 @@ app.use(cors({
 app.use(express.json());
 app.use(cookieParser());
 
-// Serve local uploads folder statically
-const publicDir = path.join(__dirname, 'public');
-const uploadsDir = path.join(publicDir, 'uploads');
+// Serve local uploads folder statically from the persistent database volume
+const dbDir = process.env.DATABASE_DIR || __dirname;
+const uploadsDir = path.join(dbDir, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
@@ -571,6 +571,16 @@ app.delete('/api/admin/uploads/:uploadId', authenticateAdmin, async (req, res) =
     res.status(500).json({ error: 'Failed to delete upload.' });
   }
 });
+
+// Serve static assets from frontend/dist in production
+const frontendDistPath = path.join(__dirname, '../frontend/dist');
+if (fs.existsSync(frontendDistPath)) {
+  console.log(`Serving static production frontend assets from: ${frontendDistPath}`);
+  app.use(express.static(frontendDistPath));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(frontendDistPath, 'index.html'));
+  });
+}
 
 // Start Express Server
 app.listen(PORT, () => {

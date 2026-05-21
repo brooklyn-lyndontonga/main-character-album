@@ -3,6 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
+// Configure upload directory
+const dbDir = process.env.DATABASE_DIR || __dirname;
+const uploadsDir = path.join(dbDir, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
 // Check if credentials are present
 const isCloudinaryConfigured = 
   process.env.CLOUDINARY_CLOUD_NAME && 
@@ -17,13 +24,7 @@ if (isCloudinaryConfigured) {
   });
   console.log('Cloudinary successfully configured.');
 } else {
-  console.warn('⚠️ Cloudinary environment variables are missing! Falling back to local disk storage in /public/uploads.');
-  
-  // Ensure local upload directories exist
-  const uploadsDir = path.join(__dirname, 'public', 'uploads');
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-  }
+  console.warn('⚠️ Cloudinary environment variables are missing! Falling back to local disk storage in the persistent uploads folder.');
 }
 
 const PRESET_TRANSFORMATIONS = {
@@ -93,7 +94,7 @@ const uploadFile = async (file, preset) => {
   } else {
     // Local Fallback Flow
     const filename = `${uuidv4()}-${file.originalname.replace(/\s+/g, '_')}`;
-    const targetPath = path.join(__dirname, 'public', 'uploads', filename);
+    const targetPath = path.join(uploadsDir, filename);
     
     // Write buffer to disk
     await fs.promises.writeFile(targetPath, file.buffer);
@@ -123,7 +124,7 @@ const deleteFile = async (publicId) => {
     }
   } else {
     try {
-      const filePath = path.join(__dirname, 'public', 'uploads', publicId);
+      const filePath = path.join(uploadsDir, publicId);
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
         console.log(`Deleted local file: ${publicId}`);
