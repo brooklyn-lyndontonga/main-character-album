@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import EventLanding from './components/EventLanding';
 import AdminDashboard from './components/AdminDashboard';
-import { Camera, ShieldAlert, Sparkles, Key, HelpCircle } from 'lucide-react';
+import { Camera, Sparkles, Key, HelpCircle } from 'lucide-react';
 
 function App() {
   const [currentPath, setCurrentPath] = useState(window.location.pathname);

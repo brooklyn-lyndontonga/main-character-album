@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { X, Upload, Camera, Film, CheckCircle, AlertCircle, Sparkles } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { X, Upload, Film, CheckCircle, AlertCircle, Sparkles } from 'lucide-react';
 
 const PRESET_LABELS = {
   '35mm-natural': '35mm Negative',
@@ -21,7 +21,6 @@ function UploadDrawer({ isOpen, onClose, slug, tagCode, preset, onUploadSuccess 
   
   const fileInputRef = useRef(null);
 
-  if (!isOpen) return null;
 
   // Handle file selection
   const handleFileChange = (e) => {
@@ -76,6 +75,10 @@ function UploadDrawer({ isOpen, onClose, slug, tagCode, preset, onUploadSuccess 
     }, 250);
 
     try {
+      if (!navigator.onLine) {
+        throw new Error('Network offline');
+      }
+
       const res = await fetch(`/api/events/${slug}/upload`, {
         method: 'POST',
         body: formData
@@ -99,8 +102,58 @@ function UploadDrawer({ isOpen, onClose, slug, tagCode, preset, onUploadSuccess 
 
     } catch (err) {
       clearInterval(progressInterval);
-      setErrorMessage(err.message || 'Upload processing failed.');
-      setStatus('error');
+      
+      // If it's a video, do not spool (too large for localStorage)
+      if (file && file.type && file.type.startsWith('video')) {
+        setErrorMessage(err.message || 'Upload processing failed.');
+        setStatus('error');
+        return;
+      }
+
+      console.warn('UploadDrawer offline or failed. Spooling to localStorage...', err);
+      
+      // Construct a spooled item
+      const tempId = `spool_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const spooledItem = {
+        id: tempId,
+        imageUrl: preview, // base64 JPEG from FileReader
+        uploaderName: uploaderName.trim() || 'Anonymous',
+        caption: caption.trim() || '',
+        createdAt: new Date().toISOString(),
+        tagCode: tagCode || null,
+        isSpooled: true,
+        type: 'image'
+      };
+
+      try {
+        // Save to localStorage spool queue
+        const queueKey = `nfc_spool_queue_${slug}`;
+        const existingQueueJson = localStorage.getItem(queueKey);
+        const existingQueue = existingQueueJson ? JSON.parse(existingQueueJson) : [];
+        
+        const spoolEntry = {
+          id: tempId,
+          fileData: preview,
+          uploaderName: uploaderName.trim() || 'Anonymous',
+          caption: caption.trim() || '',
+          tagCode: tagCode || null,
+          createdAt: spooledItem.createdAt
+        };
+        
+        localStorage.setItem(queueKey, JSON.stringify([...existingQueue, spoolEntry]));
+
+        setProgress(100);
+        setStatus('success');
+        
+        setTimeout(() => {
+          onUploadSuccess(spooledItem);
+          resetState();
+        }, 1000);
+      } catch (quotaErr) {
+        console.error('LocalStorage write failed (quota limit):', quotaErr);
+        setErrorMessage('Failed to save offline snapshot (album is full or device storage is low).');
+        setStatus('error');
+      }
     }
   };
 
@@ -113,6 +166,8 @@ function UploadDrawer({ isOpen, onClose, slug, tagCode, preset, onUploadSuccess 
     setProgress(0);
     setErrorMessage('');
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center select-none">

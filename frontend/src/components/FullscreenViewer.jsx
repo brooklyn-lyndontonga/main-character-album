@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, ChevronUp, ChevronDown, User, Calendar, Tag, 
   Settings, Camera, Image as ImageIcon, RotateCw, 
-  Sparkles, Check, AlertTriangle, Upload, Eye 
+  Sparkles, Check, AlertTriangle, Upload, Eye, Share2, Download 
 } from 'lucide-react';
 
 function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload, slug, tagCode }) {
@@ -38,6 +38,12 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
   const [cameraUploading, setCameraUploading] = useState(false);
   const [cameraUploaderName, setCameraUploaderName] = useState('');
   const [cameraCaption, setCameraCaption] = useState('');
+
+  // Keepsake Generator states
+  const [showKeepsakeModal, setShowKeepsakeModal] = useState(false);
+  const [keepsakeProcessing, setKeepsakeProcessing] = useState(false);
+  const [keepsakeTheme, setKeepsakeTheme] = useState('noir'); // 'noir' | 'sepia' | 'chrome'
+  const [includePolaroidFrame, setIncludePolaroidFrame] = useState(false);
 
   // Refs
   const containerRef = useRef(null);
@@ -199,6 +205,12 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
     if (isAnimating) return;
     // Only capture primary touch/left click
     if (e.button !== undefined && e.button !== 0) return;
+
+    // Prevent gesture engine from hijacking interaction with native HTML form fields
+    const tagName = e.target.tagName.toLowerCase();
+    if (tagName === 'input' || tagName === 'textarea' || e.target.closest('button') || e.target.closest('select') || e.target.closest('a')) {
+      return; // Preserve native browser focus, typing, and clicks
+    }
 
     setPointerStart({ x: e.clientX, y: e.clientY });
     setIsDragging(true);
@@ -362,6 +374,59 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
     reader.readAsDataURL(file);
   };
 
+  const spoolOfflinePhoto = (base64Data, name, desc) => {
+    const tempId = `spool_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const spooledItem = {
+      id: tempId,
+      imageUrl: base64Data,
+      uploaderName: name.trim() || 'Anonymous',
+      caption: desc.trim() || '',
+      createdAt: new Date().toISOString(),
+      tagCode: tagCode || null,
+      isSpooled: true,
+      type: 'image'
+    };
+
+    try {
+      // Save to localStorage spool queue
+      const queueKey = `nfc_spool_queue_${slug}`;
+      const existingQueueJson = localStorage.getItem(queueKey);
+      const existingQueue = existingQueueJson ? JSON.parse(existingQueueJson) : [];
+      
+      const spoolEntry = {
+        id: tempId,
+        fileData: base64Data,
+        uploaderName: name.trim() || 'Anonymous',
+        caption: desc.trim() || '',
+        tagCode: tagCode || null,
+        createdAt: spooledItem.createdAt
+      };
+      
+      localStorage.setItem(queueKey, JSON.stringify([...existingQueue, spoolEntry]));
+
+      // Prepend to parent uploads state
+      if (onNewUpload) {
+        onNewUpload(spooledItem);
+      }
+
+      // Reset current form views
+      setLibraryFile(null);
+      setLibraryPreview(null);
+      setCaption('');
+      setUploaderName('');
+      setSnappedPhoto(null);
+      setCameraCaption('');
+      setCameraUploaderName('');
+
+      // Navigate to visual carousel and focus slide 0 (newest item)
+      setHorizontalState('view');
+      setCurrentIndex(0);
+    } catch (quotaErr) {
+      console.error('LocalStorage write failed (quota limit):', quotaErr);
+      alert('Failed to save offline snapshot. The device storage is low or full.');
+    }
+  };
+
   // Upload Submits
   const handleLibraryUploadSubmit = async (e) => {
     e.preventDefault();
@@ -377,6 +442,10 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
     }
 
     try {
+      if (!navigator.onLine) {
+        throw new Error('Network offline');
+      }
+
       const res = await fetch(`/api/events/${slug}/upload`, {
         method: 'POST',
         body: formData
@@ -400,7 +469,14 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
       setCurrentIndex(0);
     } catch (err) {
       console.error(err);
-      alert('Failed to upload library image. Please try again.');
+      
+      // If it's a video, we do not spool (too large for localStorage)
+      if (libraryFile && libraryFile.type && libraryFile.type.startsWith('video')) {
+        alert('Failed to upload video. Please check your internet connection and try again.');
+      } else {
+        console.warn('Library upload failed or offline. Spooling snapshot...', err);
+        spoolOfflinePhoto(libraryPreview, uploaderName, caption);
+      }
     } finally {
       setUploading(false);
     }
@@ -413,6 +489,10 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
     setCameraUploading(true);
 
     try {
+      if (!navigator.onLine) {
+        throw new Error('Network offline');
+      }
+
       // Decode dataurl blob
       const response = await fetch(snappedPhoto);
       const blob = await response.blob();
@@ -447,8 +527,8 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
       setHorizontalState('view');
       setCurrentIndex(0);
     } catch (err) {
-      console.error(err);
-      alert('Failed to develop snapshot. Please try again.');
+      console.warn('Camera upload failed or offline. Spooling snapshot...', err);
+      spoolOfflinePhoto(snappedPhoto, cameraUploaderName, cameraCaption);
     } finally {
       setCameraUploading(false);
     }
@@ -489,6 +569,14 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
           )}
         </div>
 
+        {/* Pulsating orange pending offline sync overlay badge */}
+        {upload.isSpooled && (
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-35 flex items-center gap-2 px-3 py-1.5 rounded-full border border-orange-500/40 bg-black/70 text-orange-400 font-mono text-[9px] font-bold uppercase tracking-wider shadow-lg animate-pulse">
+            <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-ping" />
+            <span>⚡ Offline Snapshot (Pending Sync...)</span>
+          </div>
+        )}
+
         {/* Dynamic Glassmorphic Captions Card (Floating absolute layer over full-bleed slide) */}
         <div className="absolute bottom-20 left-4 right-4 max-w-lg mx-auto glass p-4 rounded-2xl border border-white/10 shadow-2xl z-20 text-center space-y-1.5 backdrop-blur-md bg-black/45">
           {upload.caption && (
@@ -497,16 +585,28 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
             </p>
           )}
 
-          <div className="flex items-center justify-center gap-6 text-[10px] text-zinc-400 font-light pt-1">
-            <span className="flex items-center gap-1.5">
-              <User className="w-3.5 h-3.5 text-amber-500 stroke-[1.5]" />
-              Uploaded by <span className="font-bold text-zinc-300">{upload.uploaderName || 'Anonymous'}</span>
-            </span>
-            <span className="text-zinc-600">•</span>
-            <span className="flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 stroke-[1.5]" />
-              {getRelativeTime(upload.createdAt)}
-            </span>
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-white/5 mt-2">
+            <div className="flex flex-wrap items-center justify-center gap-4 text-[10px] text-zinc-400 font-light">
+              <span className="flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-amber-500 stroke-[1.5]" />
+                Uploaded by <span className="font-bold text-zinc-300">{upload.uploaderName || 'Anonymous'}</span>
+              </span>
+              <span className="text-zinc-550">•</span>
+              <span className="flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 stroke-[1.5]" />
+                {getRelativeTime(upload.createdAt)}
+              </span>
+            </div>
+
+            {!isVideo && (
+              <button
+                onClick={() => setShowKeepsakeModal(true)}
+                className="px-3 py-1.5 rounded-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 border border-amber-500/20 text-[10px] font-bold tracking-wider uppercase transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer shrink-0"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                Keepsake Card
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -531,6 +631,339 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
     } catch (e) {
       return '';
     }
+  };
+
+  const generateKeepsakeCard = (downloadMode = true) => {
+    if (!currentUpload || keepsakeProcessing) return;
+    setKeepsakeProcessing(true);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 1080;
+    canvas.height = 1920;
+    const ctx = canvas.getContext('2d');
+
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+
+    img.onload = () => {
+      try {
+        // 1. Draw Backdrop
+        const bgGrad = ctx.createLinearGradient(0, 0, 0, 1920);
+        if (keepsakeTheme === 'noir') {
+          bgGrad.addColorStop(0, '#0f0f13');
+          bgGrad.addColorStop(1, '#040405');
+        } else if (keepsakeTheme === 'sepia') {
+          bgGrad.addColorStop(0, '#362a24');
+          bgGrad.addColorStop(1, '#1b1411');
+        } else { // 'chrome'
+          bgGrad.addColorStop(0, '#1c1d24');
+          bgGrad.addColorStop(1, '#0a0a0c');
+        }
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, 1080, 1920);
+
+        // 2. Draw punched film strip sprocket holes on left and right columns
+        const drawSprocket = (x, y, w, h, r) => {
+          ctx.fillStyle = '#000000';
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(x, y, w, h, r);
+          } else {
+            ctx.rect(x, y, w, h);
+          }
+          ctx.fill();
+          
+          // Outer gold/silver subtle glow
+          ctx.strokeStyle = keepsakeTheme === 'sepia' ? 'rgba(217, 119, 6, 0.12)' : 'rgba(255, 255, 255, 0.08)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        };
+
+        const sprocketW = 25;
+        const sprocketH = 36;
+        const sprocketR = 6;
+        const sprocketSpacing = 72;
+        const startY = 70;
+        const endY = 1920 - 70;
+
+        for (let y = startY; y < endY; y += sprocketSpacing) {
+          // Left Column
+          drawSprocket(40, y, sprocketW, sprocketH, sprocketR);
+          // Right Column
+          drawSprocket(1080 - 40 - sprocketW, y, sprocketW, sprocketH, sprocketR);
+        }
+
+        // 3. Draw thin accent frame border box
+        ctx.strokeStyle = keepsakeTheme === 'sepia' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255, 255, 255, 0.12)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(85, 80, 1080 - 170, 1920 - 160, 20);
+        } else {
+          ctx.rect(85, 80, 1080 - 170, 1920 - 160);
+        }
+        ctx.stroke();
+
+        // 4. Header title text
+        ctx.textAlign = 'center';
+        if (keepsakeTheme === 'sepia') {
+          ctx.fillStyle = '#d97706';
+          ctx.font = 'bold 22px Courier New, monospace';
+          ctx.fillText('MAIN CHARACTER VINTAGE MEMORY // CACHE FILE', 1080 / 2, 140);
+        } else {
+          ctx.fillStyle = '#f59e0b';
+          ctx.font = 'italic 24px Playfair Display, Georgia, serif';
+          ctx.fillText('MAIN CHARACTER EXCLUSIVE // 35MM MEMORY PRINT', 1080 / 2, 140);
+        }
+
+        // 5. Draw centered photo block
+        const containerX = 120;
+        const containerY = 190;
+        const containerW = 840;
+        const containerH = 1120;
+
+        if (includePolaroidFrame) {
+          // Polaroid white background block
+          ctx.fillStyle = '#f7f5f0'; // warm chalk white
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(containerX, containerY, containerW, containerH, 12);
+          } else {
+            ctx.rect(containerX, containerY, containerW, containerH);
+          }
+          ctx.fill();
+          
+          // Polaroid soft shadow edge
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          // Image block inside Polaroid
+          const imgX = containerX + 35;
+          const imgY = containerY + 35;
+          const imgW = containerW - 70;
+          const imgH = containerH - 160; // leave larger bottom gap for writing!
+
+          // Object-cover calculations
+          const imgRatio = img.width / img.height;
+          const targetRatio = imgW / imgH;
+          let sx = 0, sy = 0, sWidth = img.width, sHeight = img.height;
+
+          if (imgRatio > targetRatio) {
+            sWidth = img.height * targetRatio;
+            sx = (img.width - sWidth) / 2;
+          } else {
+            sHeight = img.width / imgRatio;
+            sy = (img.height - sHeight) / 2;
+          }
+
+          ctx.drawImage(img, sx, sy, sWidth, sHeight, imgX, imgY, imgW, imgH);
+
+          // Draw handwritten style caption on polaroid bottom
+          ctx.fillStyle = '#1e1e24';
+          ctx.textAlign = 'center';
+          ctx.font = 'italic bold 28px Georgia, serif';
+          const pCaption = currentUpload.caption 
+            ? `"${currentUpload.caption.slice(0, 42)}${currentUpload.caption.length > 42 ? '...' : ''}"` 
+            : `Memory captured by ${currentUpload.uploaderName || 'Anonymous'}`;
+          ctx.fillText(pCaption, 1080 / 2, containerY + containerH - 60);
+        } else {
+          // Classic edge border container
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(containerX, containerY, containerW, containerH, 16);
+          } else {
+            ctx.rect(containerX, containerY, containerW, containerH);
+          }
+          ctx.stroke();
+
+          // Clip image to rounded rect
+          ctx.save();
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(containerX, containerY, containerW, containerH, 16);
+          } else {
+            ctx.rect(containerX, containerY, containerW, containerH);
+          }
+          ctx.clip();
+
+          // Object-cover
+          const imgRatio = img.width / img.height;
+          const targetRatio = containerW / containerH;
+          let sx = 0, sy = 0, sWidth = img.width, sHeight = img.height;
+
+          if (imgRatio > targetRatio) {
+            sWidth = img.height * targetRatio;
+            sx = (img.width - sWidth) / 2;
+          } else {
+            sHeight = img.width / imgRatio;
+            sy = (img.height - sHeight) / 2;
+          }
+
+          ctx.drawImage(img, sx, sy, sWidth, sHeight, containerX, containerY, containerW, containerH);
+          ctx.restore();
+        }
+
+        // 6. Draw Divider Line
+        const dividerY = 1360;
+        ctx.strokeStyle = keepsakeTheme === 'sepia' ? 'rgba(217, 119, 6, 0.15)' : 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(140, dividerY);
+        ctx.lineTo(1080 - 140, dividerY);
+        ctx.stroke();
+
+        // 7. Render Metadata Text Blocks
+        ctx.textAlign = 'left';
+        ctx.fillStyle = keepsakeTheme === 'sepia' ? '#b45309' : '#e4e4e7';
+        ctx.font = 'bold 24px Outfit, sans-serif';
+        const nameText = `CAPTURED BY: ${currentUpload.uploaderName?.toUpperCase() || 'ANONYMOUS GUEST'}`;
+        ctx.fillText(nameText, 140, dividerY + 50);
+
+        ctx.textAlign = 'right';
+        ctx.fillStyle = keepsakeTheme === 'sepia' ? '#d97706' : '#a1a1aa';
+        ctx.font = '18px monospace';
+        const dateText = `${new Date(currentUpload.createdAt).toLocaleDateString()} // ${currentUpload.tagCode ? 'NFC VERIFIED' : 'WEB contributions'}`;
+        ctx.fillText(dateText, 1080 - 140, dividerY + 48);
+
+        // 8. Render wrapped Caption Paragraph below photo
+        if (currentUpload.caption && !includePolaroidFrame) {
+          ctx.textAlign = 'left';
+          ctx.fillStyle = keepsakeTheme === 'sepia' ? '#f59e0b' : '#ffffff';
+          ctx.font = 'italic 25px Georgia, serif';
+          
+          const textX = 140;
+          const textY = dividerY + 110;
+          const maxTextW = 800;
+          const textLineHeight = 36;
+          
+          // inline wrap text implementation
+          const words = `"${currentUpload.caption}"`.split(' ');
+          let line = '';
+          let currentY = textY;
+          for (let n = 0; n < words.length; n++) {
+            const testLine = line + words[n] + ' ';
+            const metrics = ctx.measureText(testLine);
+            const testWidth = metrics.width;
+            if (testWidth > maxTextW && n > 0) {
+              ctx.fillText(line, textX, currentY);
+              line = words[n] + ' ';
+              currentY += textLineHeight;
+            } else {
+              line = testLine;
+            }
+          }
+          ctx.fillText(line, textX, currentY);
+        }
+
+        // 9. Branding/Watermark Signature at the very bottom
+        ctx.textAlign = 'center';
+        ctx.fillStyle = keepsakeTheme === 'sepia' ? 'rgba(217, 119, 6, 0.4)' : 'rgba(255, 255, 255, 0.25)';
+        ctx.font = 'bold 15px monospace';
+        
+        const serialNo = currentUpload.id.slice(-10).toUpperCase();
+        ctx.fillText(`MAIN CHARACTER CO. • KEEP THIS PORTAL SOUVENIR • SERIAL #${serialNo}`, 1080 / 2, 1810);
+
+        // 10. Generate elegant bottom serial-bar code lines
+        const barcodeY = 1835;
+        const barColors = keepsakeTheme === 'sepia' ? ['#d97706', 'rgba(217,119,6,0.3)', '#b45309'] : ['#f59e0b', 'rgba(255,255,255,0.15)', '#a1a1aa'];
+        ctx.fillStyle = barColors[0];
+        let bx = 1080 / 2 - 150;
+        ctx.fillRect(bx, barcodeY, 8, 30);
+        bx += 14;
+        ctx.fillStyle = barColors[1];
+        ctx.fillRect(bx, barcodeY, 4, 30);
+        bx += 8;
+        ctx.fillStyle = barColors[2];
+        ctx.fillRect(bx, barcodeY, 12, 30);
+        bx += 18;
+        ctx.fillStyle = barColors[0];
+        ctx.fillRect(bx, barcodeY, 6, 30);
+        bx += 12;
+        ctx.fillStyle = barColors[1];
+        ctx.fillRect(bx, barcodeY, 18, 30);
+        bx += 24;
+        ctx.fillStyle = barColors[2];
+        ctx.fillRect(bx, barcodeY, 4, 30);
+        bx += 10;
+        ctx.fillStyle = barColors[0];
+        ctx.fillRect(bx, barcodeY, 10, 30);
+        bx += 16;
+        ctx.fillStyle = barColors[1];
+        ctx.fillRect(bx, barcodeY, 6, 30);
+        bx += 12;
+        ctx.fillStyle = barColors[2];
+        ctx.fillRect(bx, barcodeY, 14, 30);
+
+        // 11. Complete & download or share
+        const exportUrl = canvas.toDataURL('image/jpeg', 0.92);
+        
+        if (downloadMode) {
+          const downloadLink = document.createElement('a');
+          downloadLink.download = `keepsake-${slug}-${serialNo.toLowerCase()}.jpg`;
+          downloadLink.href = exportUrl;
+          document.body.appendChild(downloadLink);
+          downloadLink.click();
+          document.body.removeChild(downloadLink);
+          setKeepsakeProcessing(false);
+        } else {
+          // Native Web Share API if possible
+          if (navigator.share) {
+            fetch(exportUrl)
+              .then(res => res.blob())
+              .then(blob => {
+                const file = new File([blob], `keepsake-${serialNo}.jpg`, { type: 'image/jpeg' });
+                navigator.share({
+                  files: [file],
+                  title: `NFC Album Keepsake`,
+                  text: `Check out this keepsake from the ${slug} event!`
+                }).catch(err => {
+                  console.warn('Sharing failed:', err);
+                });
+              });
+          } else {
+            // Fallback: Copy to clipboard or alert
+            alert('Keepsake card ready! Click the Download button to save it to your device.');
+          }
+          setKeepsakeProcessing(false);
+        }
+      } catch (err) {
+        console.error('Keepsake canvas drawing crashed:', err);
+        alert('Keepsake card generation failed. Please try a different photo.');
+        setKeepsakeProcessing(false);
+      }
+    };
+
+    img.onerror = (e) => {
+      console.error('Failed to load image on canvas:', currentUpload.imageUrl, e);
+      try {
+        const fallbackImg = new Image();
+        fallbackImg.onload = () => {
+          ctx.fillStyle = '#0f0f13';
+          ctx.fillRect(0, 0, 1080, 1920);
+          ctx.drawImage(fallbackImg, 120, 190, 840, 1120);
+          const exportUrl = canvas.toDataURL('image/jpeg', 0.85);
+          const downloadLink = document.createElement('a');
+          downloadLink.download = `keepsake-${slug}-fallback.jpg`;
+          downloadLink.href = exportUrl;
+          document.body.appendChild(downloadLink);
+          downloadLink.click();
+          document.body.removeChild(downloadLink);
+          setKeepsakeProcessing(false);
+        };
+        fallbackImg.onerror = () => {
+          alert('Could not load original image from host server.');
+          setKeepsakeProcessing(false);
+        };
+        fallbackImg.src = currentUpload.imageUrl;
+      } catch (fErr) {
+        setKeepsakeProcessing(false);
+      }
+    };
+
+    img.src = currentUpload.imageUrl;
   };
 
   // Drag offsets calculations for horizontal panels
@@ -1100,6 +1533,248 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
           Swipe right or tap the top Close button (X) to exit camera
         </div>
       </aside>
+
+      {/* RETRO KEEPSAKE FILM CARD GENERATOR MODAL */}
+      {showKeepsakeModal && (
+        <div 
+          onClick={() => setShowKeepsakeModal(false)}
+          className="absolute inset-0 z-55 flex items-center justify-center bg-black/90 backdrop-blur-2xl p-4 md:p-8 overflow-y-auto"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-4xl bg-[#09090b]/95 border border-white/10 rounded-3xl overflow-hidden shadow-2xl p-6 md:p-8 flex flex-col md:flex-row gap-8 relative max-h-[90vh] overflow-y-auto"
+          >
+            {/* Close Button */}
+            <button
+              onClick={() => setShowKeepsakeModal(false)}
+              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white flex items-center justify-center transition-all cursor-pointer z-10"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* Left: 9:16 Retro Film Card Live CSS Preview */}
+            <div className="flex-1 flex flex-col items-center justify-center">
+              <span className="text-[10px] font-bold tracking-widest text-zinc-500 mb-3 uppercase flex items-center gap-1.5">
+                <Eye className="w-3.5 h-3.5" />
+                Live Keepsake Print Preview
+              </span>
+              
+              <div 
+                className={`w-full max-w-[280px] aspect-[9/16] rounded-2xl border relative overflow-hidden shadow-2xl flex flex-col justify-between p-7 select-none transition-all duration-300 ${
+                  keepsakeTheme === 'noir'
+                    ? 'bg-[#0f0f13] border-amber-500/20 text-white'
+                    : keepsakeTheme === 'sepia'
+                    ? 'bg-[#362a24] border-amber-800/30 text-amber-100'
+                    : 'bg-[#1c1d24] border-zinc-700 text-white'
+                }`}
+              >
+                {/* CSS Sprocket Holes - Left Margin */}
+                <div className="absolute left-2.5 top-0 bottom-0 flex flex-col justify-around py-4 pointer-events-none">
+                  {Array.from({ length: 12 }).map((_, i) => (
+                    <div 
+                      key={`sp-l-${i}`} 
+                      className={`w-1.5 h-3 bg-black rounded-[2px] border transition-colors ${
+                        keepsakeTheme === 'sepia' ? 'border-amber-800/10' : 'border-white/5'
+                      }`} 
+                    />
+                  ))}
+                </div>
+
+                {/* CSS Sprocket Holes - Right Margin */}
+                <div className="absolute right-2.5 top-0 bottom-0 flex flex-col justify-around py-4 pointer-events-none">
+                  {Array.from({ length: 12 }).map((_, i) => (
+                    <div 
+                      key={`sp-r-${i}`} 
+                      className={`w-1.5 h-3 bg-black rounded-[2px] border transition-colors ${
+                        keepsakeTheme === 'sepia' ? 'border-amber-800/10' : 'border-white/5'
+                      }`} 
+                    />
+                  ))}
+                </div>
+
+                {/* Header visual */}
+                <div className="text-center font-mono text-[6px] tracking-wider pointer-events-none uppercase mb-2">
+                  {keepsakeTheme === 'sepia' ? (
+                    <span className="text-amber-600 font-bold">MAIN CHARACTER VINTAGE MEMORY // CACHE</span>
+                  ) : (
+                    <span className="text-amber-500 italic">MAIN CHARACTER EXCLUSIVE // 35MM MEMORY PRINT</span>
+                  )}
+                </div>
+
+                {/* Main Photo container */}
+                <div className="flex-1 w-full flex items-center justify-center overflow-hidden relative">
+                  {includePolaroidFrame ? (
+                    /* Cream Polaroid Style Frame */
+                    <div className="w-full h-full bg-[#f7f5f0] rounded-lg p-2.5 pb-9 shadow-md flex flex-col justify-between items-center transition-all duration-300 select-none">
+                      <div className="w-full flex-1 overflow-hidden rounded relative">
+                        <img 
+                          src={currentUpload.imageUrl} 
+                          alt="Polaroid Preview" 
+                          className="w-full h-full object-cover select-none pointer-events-none"
+                        />
+                      </div>
+                      <span className="text-[7.5px] font-bold text-zinc-800 font-serif italic mt-2 pointer-events-none block whitespace-nowrap overflow-hidden text-ellipsis w-full text-center">
+                        {currentUpload.caption 
+                          ? `"${currentUpload.caption.slice(0, 32)}${currentUpload.caption.length > 32 ? '...' : ''}"` 
+                          : `Captured by ${currentUpload.uploaderName || 'Anonymous'}`}
+                      </span>
+                    </div>
+                  ) : (
+                    /* Classic Photo Border */
+                    <div className="w-full h-full rounded-lg overflow-hidden border border-white/5 shadow-lg select-none relative">
+                      <img 
+                        src={currentUpload.imageUrl} 
+                        alt="Keepsake Preview" 
+                        className="w-full h-full object-cover select-none pointer-events-none"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Divider bar */}
+                <div 
+                  className={`w-full h-[0.5px] my-3 ${
+                    keepsakeTheme === 'sepia' ? 'bg-amber-800/20' : 'bg-white/10'
+                  }`} 
+                />
+
+                {/* Footer details info block */}
+                <div className="space-y-2 pointer-events-none">
+                  <div className="flex items-center justify-between text-[6.5px]">
+                    <span className="font-bold uppercase tracking-wider block max-w-[130px] overflow-hidden text-ellipsis whitespace-nowrap">
+                      BY: {currentUpload.uploaderName || 'ANONYMOUS'}
+                    </span>
+                    <span className="font-mono text-zinc-500">
+                      {new Date(currentUpload.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+
+                  {!includePolaroidFrame && currentUpload.caption && (
+                    <p className={`text-[6.5px] italic leading-tight max-h-10 overflow-hidden line-clamp-2 ${
+                      keepsakeTheme === 'sepia' ? 'text-amber-700' : 'text-zinc-300'
+                    }`}>
+                      "{currentUpload.caption}"
+                    </p>
+                  )}
+
+                  {/* Brand Barcode details */}
+                  <div className="flex flex-col items-center gap-1 pt-1">
+                    <span className="text-[5px] text-zinc-500 font-mono tracking-widest">
+                      PORTAL CARD // SERIAL#{currentUpload.id.slice(-8).toUpperCase()}
+                    </span>
+                    {/* CSS Mockup Barcode */}
+                    <div className="flex gap-[1.5px] items-center h-4 opacity-50 justify-center">
+                      <div className="w-[1.5px] h-full bg-zinc-400" />
+                      <div className="w-[0.5px] h-full bg-zinc-400" />
+                      <div className="w-1 h-full bg-zinc-400" />
+                      <div className="w-[0.5px] h-full bg-zinc-400" />
+                      <div className="w-[1.5px] h-full bg-zinc-400" />
+                      <div className="w-[2px] h-full bg-zinc-400" />
+                      <div className="w-[0.5px] h-full bg-zinc-400" />
+                      <div className="w-[1.5px] h-full bg-zinc-400" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Customisation Options and Actions */}
+            <div className="flex-1 flex flex-col justify-between py-2 space-y-6">
+              <div className="space-y-5">
+                <div>
+                  <h3 className="text-white text-base font-bold tracking-wide">Customize Event Keepsake</h3>
+                  <p className="text-[10px] text-zinc-400 mt-1 leading-normal">
+                    Generate an ultra-premium high-resolution 1080x1920 portrait memory card perfect for Instagram Stories, printing, or physical party favors.
+                  </p>
+                </div>
+
+                {/* Border / Accent theme selector */}
+                <div className="space-y-2.5">
+                  <label className="block text-[9px] font-bold text-zinc-400 tracking-wider uppercase">Select Print Aesthetic Stock</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: 'noir', name: 'Darkroom Noir', desc: 'Midnight Gold' },
+                      { id: 'sepia', name: 'Vintage Sepia', desc: 'Amber Warmth' },
+                      { id: 'chrome', name: 'Liquid Chrome', desc: 'Monochrome' }
+                    ].map((t) => {
+                      const isActive = keepsakeTheme === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => setKeepsakeTheme(t.id)}
+                          className={`p-3 rounded-xl border text-left flex flex-col justify-between cursor-pointer transition-all active:scale-95 ${
+                            isActive
+                              ? 'border-amber-500 bg-amber-500/10 text-amber-400 shadow-lg'
+                              : 'border-white/5 bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          <span className="text-[10px] font-bold tracking-wide block">{t.name}</span>
+                          <span className="text-[8px] opacity-60 mt-1 block">{t.desc}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Polaroid Frame Toggle switch */}
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-white/5 border border-white/5">
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-bold text-zinc-200 uppercase tracking-wider">Polaroid-Style Frame</div>
+                    <div className="text-[9px] text-zinc-500 leading-normal max-w-[220px]">
+                      Embed photo inside a retro thick matte border with centered handwritten signature details.
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setIncludePolaroidFrame(!includePolaroidFrame)}
+                    className={`w-11 h-6 rounded-full transition-colors flex items-center p-0.5 cursor-pointer shrink-0 ${
+                      includePolaroidFrame ? 'bg-amber-500 justify-end' : 'bg-zinc-800 justify-start'
+                    }`}
+                  >
+                    <span className="w-5 h-5 rounded-full bg-white shadow-lg transition-transform" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="space-y-3 pt-4 border-t border-white/5">
+                <button
+                  onClick={() => generateKeepsakeCard(true)}
+                  disabled={keepsakeProcessing}
+                  className="w-full py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-600 text-black font-extrabold text-xs tracking-widest uppercase transition-all active:scale-98 shadow-xl shadow-amber-500/10 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+                >
+                  {keepsakeProcessing ? (
+                    <>
+                      <RotateCw className="w-4 h-4 animate-spin" />
+                      COMPILING PRINTS...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4" />
+                      COMPILE & DOWNLOAD FILM CARD
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => generateKeepsakeCard(false)}
+                  disabled={keepsakeProcessing}
+                  className="w-full py-3.5 rounded-2xl bg-white/5 hover:bg-white/10 text-white font-extrabold text-xs tracking-widest uppercase transition-all border border-white/10 flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-55"
+                >
+                  <Share2 className="w-4 h-4" />
+                  SHARE TO INSTAGRAM / STORY
+                </button>
+
+                <button
+                  onClick={() => setShowKeepsakeModal(false)}
+                  className="w-full py-2.5 rounded-xl text-zinc-500 hover:text-zinc-300 font-bold text-[10px] tracking-widest uppercase transition-colors cursor-pointer text-center"
+                >
+                  CANCEL & RETURN TO ALBUM
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

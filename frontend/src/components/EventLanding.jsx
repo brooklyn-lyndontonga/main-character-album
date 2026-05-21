@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Camera, Image as ImageIcon, Sparkles, RefreshCw, Key, ChevronRight, Lock, Eye, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Camera, RefreshCw, ChevronRight, Lock, AlertCircle } from 'lucide-react';
 import Gallery from './Gallery';
 import UploadDrawer from './UploadDrawer';
 import FullscreenViewer from './FullscreenViewer';
@@ -20,8 +20,21 @@ function EventLanding({ slug, tagCode, navigate }) {
   const [viewerIndex, setViewerIndex] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Fetch uploads
+  const fetchUploads = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/events/${slug}/uploads`);
+      if (res.ok) {
+        const data = await res.json();
+        setUploads(data);
+      }
+    } catch (err) {
+      console.error('Error fetching uploads:', err);
+    }
+  }, [slug]);
+
   // Fetch event meta
-  const fetchEventData = async (code = tagCode) => {
+  const fetchEventData = useCallback(async (code = tagCode) => {
     try {
       const url = code 
         ? `/api/events/${slug}?t=${code}` 
@@ -50,24 +63,14 @@ function EventLanding({ slug, tagCode, navigate }) {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Fetch uploads
-  const fetchUploads = async () => {
-    try {
-      const res = await fetch(`/api/events/${slug}/uploads`);
-      if (res.ok) {
-        const data = await res.json();
-        setUploads(data);
-      }
-    } catch (err) {
-      console.error('Error fetching uploads:', err);
-    }
-  };
+  }, [slug, tagCode, fetchUploads]);
 
   useEffect(() => {
-    fetchEventData();
-  }, [slug]);
+    const timer = setTimeout(() => {
+      fetchEventData();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchEventData]);
 
   // Realtime polling: refresh uploads every 12 seconds
   useEffect(() => {
@@ -77,7 +80,97 @@ function EventLanding({ slug, tagCode, navigate }) {
       }, 12000);
       return () => clearInterval(interval);
     }
-  }, [event]);
+  }, [event, fetchUploads]);
+
+  // Background Sync Engine for offline spool queue
+  const syncInProgressRef = useRef(false);
+
+  const processSpoolQueue = useCallback(async () => {
+    if (syncInProgressRef.current || !navigator.onLine) return;
+
+    const queueKey = `nfc_spool_queue_${slug}`;
+    const queueJson = localStorage.getItem(queueKey);
+    if (!queueJson) return;
+
+    let queue;
+    try {
+      queue = JSON.parse(queueJson);
+    } catch {
+      return;
+    }
+    if (!Array.isArray(queue) || queue.length === 0) return;
+
+    syncInProgressRef.current = true;
+
+    // Process the first item in the queue
+    const item = queue[0];
+    try {
+      // Decode dataurl blob
+      const response = await fetch(item.fileData);
+      const blob = await response.blob();
+      const file = new File([blob], 'snapshot.jpg', { type: 'image/jpeg' });
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('uploaderName', item.uploaderName);
+      formData.append('caption', item.caption);
+      if (item.tagCode) {
+        formData.append('tagCode', item.tagCode);
+      }
+
+      const res = await fetch(`/api/events/${slug}/upload`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!res.ok) throw new Error('Sync upload failed');
+      const syncedUpload = await res.json();
+
+      // Replace the temporary spooled item in uploads state with the synced one
+      setUploads(prev => prev.map(up => up.id === item.id ? syncedUpload : up));
+
+      // Remove the item from localStorage queue
+      const latestQueueJson = localStorage.getItem(queueKey);
+      const latestQueue = latestQueueJson ? JSON.parse(latestQueueJson) : [];
+      const updatedQueue = latestQueue.filter(q => q.id !== item.id);
+      
+      if (updatedQueue.length > 0) {
+        localStorage.setItem(queueKey, JSON.stringify(updatedQueue));
+      } else {
+        localStorage.removeItem(queueKey);
+      }
+    } catch (err) {
+      console.error('Failed to sync spooled item:', item.id, err);
+    } finally {
+      syncInProgressRef.current = false;
+    }
+  }, [slug]);
+
+  useEffect(() => {
+    if (event && !event.requiresPasscode) {
+      // Initial process
+      const timer = setTimeout(() => {
+        processSpoolQueue();
+      }, 0);
+
+      const handleOnline = () => {
+        console.log('Browser back online. Processing offline spool...');
+        processSpoolQueue();
+      };
+      window.addEventListener('online', handleOnline);
+
+      // Periodically check/sync every 10 seconds
+      const interval = setInterval(() => {
+        processSpoolQueue();
+      }, 10000);
+
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener('online', handleOnline);
+        clearInterval(interval);
+      };
+    }
+  }, [event, processSpoolQueue]);
 
   // Handle Passcode Submit
   const handlePasscodeSubmit = async (e) => {
@@ -99,7 +192,7 @@ function EventLanding({ slug, tagCode, navigate }) {
         // Success: reload event data to clear passcode shield
         await fetchEventData();
       }
-    } catch (err) {
+    } catch {
       setPasscodeError('Connection failed.');
     } finally {
       setPasscodeSubmitting(false);
@@ -183,7 +276,6 @@ function EventLanding({ slug, tagCode, navigate }) {
 
   // PASSCODE CHALLENGE SHIELD
   if (event?.requiresPasscode) {
-    const styles = getPresetStyles(event.preset);
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6">
         <div className="absolute inset-0 bg-gradient-to-t from-black via-zinc-950/70 to-black/30 pointer-events-none z-0" />

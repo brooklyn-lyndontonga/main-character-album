@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
-  Plus, Calendar, Eye, Trash2, Key, ToggleLeft, ToggleRight, Sparkles, 
-  Settings, UserCheck, ShieldAlert, BarChart3, Database, Image as ImageIcon,
+  Plus, Eye, Trash2, Key, ToggleLeft, ToggleRight, 
+  Settings, Database, Image as ImageIcon,
   Tag, Download, Check, AlertCircle, LogOut, ExternalLink, RefreshCw
 } from 'lucide-react';
 
@@ -15,7 +15,6 @@ function AdminDashboard({ navigate }) {
   // Dashboard Core State
   const [events, setEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
-  const [activeTab, setActiveTab] = useState('events'); // events, stats, moderation
   
   // Form State (Event Creation / Editing)
   const [editingId, setEditingId] = useState(null); // null if creating
@@ -40,26 +39,8 @@ function AdminDashboard({ navigate }) {
   const [modUploads, setModUploads] = useState([]);
   const [modLoading, setModLoading] = useState(false);
 
-  // Check initial authentication
-  const verifyAuth = async () => {
-    try {
-      const res = await fetch('/api/admin/verify');
-      const data = await res.json();
-      if (data.admin) {
-        setIsAuthenticated(true);
-        fetchEvents();
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  useEffect(() => {
-    verifyAuth();
-  }, []);
-
   // Fetch all events
-  const fetchEvents = async () => {
+  const fetchEvents = useCallback(async () => {
     setLoadingEvents(true);
     try {
       const res = await fetch('/api/admin/events');
@@ -72,7 +53,28 @@ function AdminDashboard({ navigate }) {
     } finally {
       setLoadingEvents(false);
     }
-  };
+  }, []);
+
+  // Check initial authentication
+  useEffect(() => {
+    const verifyAuth = async () => {
+      try {
+        const res = await fetch('/api/admin/verify');
+        const data = await res.json();
+        if (data.admin) {
+          setIsAuthenticated(true);
+          fetchEvents();
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    
+    const timer = setTimeout(() => {
+      verifyAuth();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchEvents]);
 
   // Handle Login Submit
   const handleLogin = async (e) => {
@@ -94,7 +96,7 @@ function AdminDashboard({ navigate }) {
         setIsAuthenticated(true);
         fetchEvents();
       }
-    } catch (err) {
+    } catch {
       setLoginError('Connection failed.');
     } finally {
       setLoginLoading(false);
@@ -193,7 +195,7 @@ function AdminDashboard({ navigate }) {
         if (selectedEventForTags?.id === id) setSelectedEventForTags(null);
         if (selectedEventForMod?.id === id) setSelectedEventForMod(null);
       }
-    } catch (err) {
+    } catch {
       alert('Delete failed.');
     }
   };
@@ -274,7 +276,7 @@ function AdminDashboard({ navigate }) {
         // refresh main event list count
         fetchEvents();
       }
-    } catch (err) {
+    } catch {
       alert('Delete upload failed.');
     }
   };
