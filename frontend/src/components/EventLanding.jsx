@@ -371,6 +371,9 @@ function EventLanding({ slug, tagCode, navigate }) {
           preset={event.preset}
           initialIndex={viewerIndex}
           onClose={() => setViewerIndex(null)}
+          onNewUpload={(newUpload) => setUploads(prev => [newUpload, ...prev])}
+          slug={slug}
+          tagCode={tagCode}
         />
       )}
 
