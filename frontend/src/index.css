@@ -1,0 +1,130 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: 'Playfair Display', serif;
+  --font-sans: 'Outfit', sans-serif;
+  
+  --color-bg-dark: #070709;
+  --color-card-dark: #121216;
+  --color-accent-amber: #f59e0b;
+}
+
+/* Custom premium scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0d0d11;
+}
+::-webkit-scrollbar-thumb {
+  background: #272730;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f4e;
+}
+
+/* Immersive background gradient */
+body {
+  background: radial-gradient(circle at 50% 0%, #16161c 0%, #070709 100%);
+  color: #e4e4e7;
+  font-family: 'Outfit', sans-serif;
+  overflow-x: hidden;
+  margin: 0;
+  min-height: 100vh;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* Glassmorphism Styles */
+.glass {
+  background: rgba(18, 18, 24, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-premium {
+  background: linear-gradient(135deg, rgba(24, 24, 33, 0.8) 0%, rgba(12, 12, 16, 0.9) 100%);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7);
+}
+
+.glass-input {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glass-input:focus {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(245, 158, 11, 0.5);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.15);
+  outline: none;
+}
+
+/* Premium micro-animations */
+.hover-lift {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+}
+.hover-lift:hover {
+  transform: translateY(-4px) scale(1.015);
+  box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.5);
+}
+
+/* Aesthetic Filter Preset Classes (Applied to images in local fallback) */
+
+/* 1. 35mm negative photograph: dual-source (ambient + flash fill), cool-green bias in midtones, lifted open shadows, warm reds, clean blues, wide latitude */
+.filter-35mm-natural {
+  filter: contrast(0.9) brightness(1.04) saturate(1.08) sepia(0.04) hue-rotate(-8deg);
+}
+
+/* 2. Night-flash: bold direct front flash + background falloff + peachy skin tones + high contrast */
+.filter-35mm-flash {
+  filter: contrast(1.25) brightness(1.1) saturate(1.12) sepia(0.08) hue-rotate(6deg);
+  box-shadow: 0 0 80px rgba(0, 0, 0, 0.8) inset;
+}
+
+/* 3. Pristine digital: hyper-clear sharpness, deep blacks, zero grain, smooth gradations */
+.filter-pristine-digital {
+  filter: contrast(1.08) brightness(1.02) saturate(1.05);
+}
+
+/* 4. Cinematic portrait: soft-focus backlighting + digital sharpness + deep blacks + zero grain */
+.filter-cinematic-portrait {
+  filter: contrast(1.1) brightness(1.04) saturate(1.05) sepia(0.02) hue-rotate(1deg);
+}
+
+/* Utility to disable film grain overlay selectively */
+.no-grain::after {
+  display: none !important;
+}
+
+/* CSS film grain simulation overlay */
+.film-grain {
+  position: relative;
+}
+.film-grain::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  mix-blend-mode: overlay;
+  z-index: 10;
+}
+
+/* Float Animation */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
