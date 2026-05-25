@@ -19,6 +19,7 @@ function EventLanding({ slug, tagCode, navigate }) {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const autoOpenedRef = useRef(false);
 
   // Fetch uploads
   const fetchUploads = useCallback(async () => {
@@ -27,6 +28,12 @@ function EventLanding({ slug, tagCode, navigate }) {
       if (res.ok) {
         const data = await res.json();
         setUploads(data);
+        
+        // Auto-open full-screen viewer on initial load if photos exist
+        if (data.length > 0 && !autoOpenedRef.current) {
+          autoOpenedRef.current = true;
+          setViewerIndex(0);
+        }
       }
     } catch (err) {
       console.error('Error fetching uploads:', err);
