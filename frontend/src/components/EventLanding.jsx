@@ -285,7 +285,7 @@ function EventLanding({ slug, tagCode, navigate }) {
   if (event?.requiresPasscode) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6">
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-zinc-950/70 to-black/30 pointer-events-none z-0" />
+        <div className="absolute inset-0 bg-linear-to-t from-black via-zinc-950/70 to-black/30 pointer-events-none z-0" />
         
         {/* Event Cover blurred backdrop */}
         {event.coverImage && (
@@ -330,7 +330,7 @@ function EventLanding({ slug, tagCode, navigate }) {
             <button
               type="submit"
               disabled={passcodeSubmitting}
-              className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-semibold py-3 rounded-xl shadow-lg transition-all active:scale-98 disabled:opacity-50 text-sm tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full bg-linear-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-semibold py-3 rounded-xl shadow-lg transition-all active:scale-98 disabled:opacity-50 text-sm tracking-wider flex items-center justify-center gap-2 cursor-pointer"
             >
               {passcodeSubmitting ? 'Verifying...' : 'UNLOCK SPACE'}
               {!passcodeSubmitting && <ChevronRight className="w-4 h-4 stroke-[2.5]" />}
@@ -339,7 +339,7 @@ function EventLanding({ slug, tagCode, navigate }) {
 
           <div className="mt-8 pt-6 border-t border-white/5 flex flex-col gap-2 items-center">
             <span className="text-[10px] uppercase tracking-widest text-zinc-600">HOW DO I ACCESS?</span>
-            <p className="text-zinc-500 text-[11px] font-light max-w-[280px]">
+            <p className="text-zinc-500 text-[11px] font-light max-w-70">
               Tap the physical **NFC keyring** that was given to you for this event to instantly bypass this passcode screen!
             </p>
           </div>
@@ -355,11 +355,11 @@ function EventLanding({ slug, tagCode, navigate }) {
   return (
     <div className={`flex-1 flex flex-col pb-24 relative ${hasGrain ? 'film-grain' : 'no-grain'}`}>
       {/* Dynamic Background Glow matching Preset */}
-      <div className="absolute top-[-100px] left-1/2 -translate-x-1/2 w-full max-w-4xl h-[350px] bg-gradient-to-b from-amber-500/10 via-violet-600/5 to-transparent blur-[100px] pointer-events-none z-0" />
+      <div className="absolute -top-25 left-1/2 -translate-x-1/2 w-full max-w-4xl h-87.5 bg-linear-to-b from-amber-500/10 via-violet-600/5 to-transparent blur-[100px] pointer-events-none z-0" />
 
       {/* Main Cover Header */}
-      <section className="relative w-full h-[320px] md:h-[400px] overflow-hidden select-none z-10 border-b border-white/5">
-        <div className="absolute inset-0 bg-gradient-to-t from-[#070709] via-transparent to-black/60 z-10" />
+      <section className="relative w-full h-80 md:h-100 overflow-hidden select-none z-10 border-b border-white/5">
+        <div className="absolute inset-0 bg-linear-to-t from-bg-dark via-transparent to-black/60 z-10" />
         
         <img
           src={event.coverImage}
@@ -419,7 +419,7 @@ function EventLanding({ slug, tagCode, navigate }) {
               <Camera className="w-8 h-8 text-zinc-500 stroke-[1.5]" />
             </div>
             <h3 className="text-lg font-semibold text-zinc-200 mb-2">No memories captured yet</h3>
-            <p className="text-zinc-500 text-xs leading-relaxed mb-6 font-light max-w-[280px] mx-auto">
+            <p className="text-zinc-500 text-xs leading-relaxed mb-6 font-light max-w-70 mx-auto">
               Be the very first main character! Tap the floating camera button to contribute to this archive.
             </p>
             <button
@@ -443,10 +443,10 @@ function EventLanding({ slug, tagCode, navigate }) {
       <div className="fixed bottom-6 right-6 z-50">
         <button
           onClick={() => setIsUploadOpen(true)}
-          className="w-14 h-14 rounded-full bg-gradient-to-tr from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black flex items-center justify-center shadow-[0_8px_32px_rgba(245,158,11,0.4)] active:scale-90 hover:scale-105 transition-all duration-300 cursor-pointer relative group border-2 border-black"
+          className="w-14 h-14 rounded-full bg-linear-to-tr from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black flex items-center justify-center shadow-[0_8px_32px_rgba(245,158,11,0.4)] active:scale-90 hover:scale-105 transition-all duration-300 cursor-pointer relative group border-2 border-black"
           aria-label="Upload Photo or Video"
         >
-          <Camera className="w-6 h-6 stroke-[2]" />
+          <Camera className="w-6 h-6 stroke-2" />
           <span className="absolute -top-10 right-0 bg-zinc-950 text-white text-[10px] font-bold tracking-widest px-2.5 py-1.5 rounded-lg border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none uppercase whitespace-nowrap shadow-xl">
             ADD SNAPSHOT
           </span>
