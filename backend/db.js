@@ -3,7 +3,10 @@ const path = require('path');
 const fs = require('fs');
 
 // Ensure db directory exists
-const dbDir = process.env.DATABASE_DIR || __dirname;
+const dbDir = process.env.VERCEL 
+  ? '/tmp' 
+  : (process.env.DATABASE_DIR || __dirname);
+
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
