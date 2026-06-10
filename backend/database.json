@@ -1,0 +1,63 @@
+{
+  "events": [
+    {
+      "id": "hineamaru-uuid-123",
+      "title": "Hineamaru 21st",
+      "slug": "hineamaru-5",
+      "coverImage": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=1200&auto=format&fit=crop",
+      "preset": "35mm-natural",
+      "passcode": "2121",
+      "isPrivate": 1,
+      "createdAt": "2026-06-10T05:23:27.789Z",
+      "date": "2026-06-10",
+      "eventType": "birthday",
+      "sessionDays": 7,
+      "closesAt": null,
+      "bypassEnabled": 1,
+      "showVerifiedBadge": 1,
+      "guestNameRegistration": 1
+    }
+  ],
+  "uploads": [
+    {
+      "id": "upload-1",
+      "eventId": "hineamaru-uuid-123",
+      "uploaderName": "Te Awanui",
+      "caption": "Golden hour vibe at the beach front 🌅",
+      "imageUrl": "https://images.unsplash.com/photo-1473116763269-255ea7b2fdb2?q=80&w=1200&auto=format&fit=crop",
+      "thumbnailUrl": "https://images.unsplash.com/photo-1473116763269-255ea7b2fdb2?q=80&w=400&h=400&auto=format&fit=crop",
+      "tagCode": "ABCD123",
+      "type": "image",
+      "createdAt": "2026-06-10T05:23:27.796Z"
+    },
+    {
+      "id": "upload-2",
+      "eventId": "hineamaru-uuid-123",
+      "uploaderName": "Mereana",
+      "caption": "Setting up the tables before everyone arrives! ✨",
+      "imageUrl": "https://images.unsplash.com/photo-1519167758481-83f550bb49b3?q=80&w=1200&auto=format&fit=crop",
+      "thumbnailUrl": "https://images.unsplash.com/photo-1519167758481-83f550bb49b3?q=80&w=400&h=400&auto=format&fit=crop",
+      "tagCode": "XYZ7890",
+      "type": "image",
+      "createdAt": "2026-06-10T05:23:27.796Z"
+    }
+  ],
+  "nfc_tags": [
+    {
+      "id": "tag-1",
+      "eventId": "hineamaru-uuid-123",
+      "tagCode": "ABCD123",
+      "active": 1,
+      "guestName": "Te Awanui",
+      "createdAt": "2026-06-10T05:23:27.796Z"
+    },
+    {
+      "id": "tag-2",
+      "eventId": "hineamaru-uuid-123",
+      "tagCode": "XYZ7890",
+      "active": 1,
+      "guestName": "Mereana",
+      "createdAt": "2026-06-10T05:23:27.796Z"
+    }
+  ]
+}
