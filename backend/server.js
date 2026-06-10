@@ -728,15 +728,25 @@ app.delete('/api/admin/uploads/:uploadId', authenticateAdmin, async (req, res) =
   }
 });
 
-// Serve static assets from frontend/dist in production
+// Serve static assets from frontend/dist in production/fallback
 const frontendDistPath = path.join(__dirname, '../frontend/dist');
-if (fs.existsSync(frontendDistPath)) {
-  console.log(`Serving static production frontend assets from: ${frontendDistPath}`);
-  app.use(express.static(frontendDistPath));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(frontendDistPath, 'index.html'));
-  });
-}
+app.use(express.static(frontendDistPath));
+
+// Favicon no-op handler to prevent console error spam
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+
+app.get('*', (req, res, next) => {
+  // If requesting an API route, let it pass to next
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  const indexPath = path.join(frontendDistPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).send('Not Found. The frontend build is missing or you are running in development mode. Please access the application via the Vite dev server at http://localhost:5173/');
+  }
+});
 
 // Start Express Server
 app.listen(PORT, () => {
