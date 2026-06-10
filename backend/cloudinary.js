@@ -4,7 +4,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
 // Configure upload directory
-const dbDir = process.env.DATABASE_DIR || __dirname;
+const dbDir = process.env.VERCEL ? '/tmp' : (process.env.DATABASE_DIR || __dirname);
 const uploadsDir = path.join(dbDir, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });

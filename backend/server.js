@@ -25,7 +25,7 @@ app.use(express.json());
 app.use(cookieParser());
 
 // Serve local uploads folder statically from the persistent database volume
-const dbDir = process.env.DATABASE_DIR || __dirname;
+const dbDir = process.env.VERCEL ? '/tmp' : (process.env.DATABASE_DIR || __dirname);
 const uploadsDir = path.join(dbDir, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
@@ -749,6 +749,10 @@ app.get('*', (req, res, next) => {
 });
 
 // Start Express Server
-app.listen(PORT, () => {
-  console.log(`🚀 NFC Event Album Backend running on port ${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`🚀 NFC Event Album Backend running on port ${PORT}`);
+  });
+}
+
+module.exports = app;
