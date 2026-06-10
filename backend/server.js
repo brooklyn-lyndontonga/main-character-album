@@ -56,9 +56,14 @@ const authenticateAdmin = (req, res, next) => {
   }
 };
 
-// Generate custom unique NFC tag codes (7 chars, e.g. E9B2FD8)
+// Generate custom unique NFC tag codes (7 chars, e.g. E9B2FD8) avoiding confusable characters (O, I, 0, 1)
 const generateTagCode = () => {
-  return Math.random().toString(36).substring(2, 9).toUpperCase();
+  const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let result = '';
+  for (let i = 0; i < 7; i++) {
+    result += CHARS.charAt(Math.floor(Math.random() * CHARS.length));
+  }
+  return result;
 };
 
 // -------------------------------------------------------------
@@ -79,6 +84,9 @@ app.get('/api/events/:slug', (req, res) => {
       return res.status(404).json({ error: 'Event not found.' });
     }
 
+    let scannedTag = null;
+    const cookieAge = (event.sessionDays || 7) * 24 * 60 * 60 * 1000;
+
     // Check if album requires verification
     if (event.isPrivate === 1) {
       let authorized = false;
@@ -87,19 +95,38 @@ app.get('/api/events/:slug', (req, res) => {
       if (tagCode) {
         const tag = db.prepare('SELECT * FROM nfc_tags WHERE eventId = ? AND tagCode = ? AND active = 1').get(event.id, tagCode);
         if (tag) {
-          authorized = true;
-          // Set authorization cookie for this album
-          res.cookie(`album_auth_${slug}`, 'true', {
-            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-            httpOnly: false, // Accessible by frontend React
+          scannedTag = tag;
+          // Set tag code cookie
+          res.cookie(`nfc_tag_code_${slug}`, tagCode, {
+            maxAge: cookieAge,
+            httpOnly: false,
             sameSite: 'lax'
           });
+
+          // Respect the bypassEnabled database flag: if 1, automatically authorize
+          if (event.bypassEnabled === 1) {
+            authorized = true;
+            // Set authorization cookie for this album
+            res.cookie(`album_auth_${slug}`, 'true', {
+              maxAge: cookieAge,
+              httpOnly: false, // Accessible by frontend React
+              sameSite: 'lax'
+            });
+          }
         }
       }
 
       // 2. Check if user already holds authorization cookie
       if (!authorized && req.cookies[`album_auth_${slug}`] === 'true') {
         authorized = true;
+        // Try to read tag from cookie if it's there
+        const cookieTagCode = req.cookies[`nfc_tag_code_${slug}`];
+        if (cookieTagCode) {
+          const tag = db.prepare('SELECT * FROM nfc_tags WHERE eventId = ? AND tagCode = ? AND active = 1').get(event.id, cookieTagCode);
+          if (tag) {
+            scannedTag = tag;
+          }
+        }
       }
 
       if (!authorized) {
@@ -109,8 +136,35 @@ app.get('/api/events/:slug', (req, res) => {
           slug: event.slug,
           coverImage: event.coverImage,
           preset: event.preset,
-          requiresPasscode: true
+          requiresPasscode: true,
+          date: event.date,
+          eventType: event.eventType,
+          closesAt: event.closesAt,
+          bypassEnabled: event.bypassEnabled === 1,
+          showVerifiedBadge: event.showVerifiedBadge === 1,
+          guestNameRegistration: event.guestNameRegistration === 1
         });
+      }
+    } else {
+      // For public events, try to associate tag if scanned or saved
+      if (tagCode) {
+        const tag = db.prepare('SELECT * FROM nfc_tags WHERE eventId = ? AND tagCode = ? AND active = 1').get(event.id, tagCode);
+        if (tag) {
+          scannedTag = tag;
+          res.cookie(`nfc_tag_code_${slug}`, tagCode, {
+            maxAge: cookieAge,
+            httpOnly: false,
+            sameSite: 'lax'
+          });
+        }
+      } else {
+        const cookieTagCode = req.cookies[`nfc_tag_code_${slug}`];
+        if (cookieTagCode) {
+          const tag = db.prepare('SELECT * FROM nfc_tags WHERE eventId = ? AND tagCode = ? AND active = 1').get(event.id, cookieTagCode);
+          if (tag) {
+            scannedTag = tag;
+          }
+        }
       }
     }
 
@@ -123,7 +177,18 @@ app.get('/api/events/:slug', (req, res) => {
       preset: event.preset,
       isPrivate: event.isPrivate === 1,
       createdAt: event.createdAt,
-      requiresPasscode: false
+      requiresPasscode: false,
+      date: event.date,
+      eventType: event.eventType,
+      sessionDays: event.sessionDays,
+      closesAt: event.closesAt,
+      bypassEnabled: event.bypassEnabled === 1,
+      showVerifiedBadge: event.showVerifiedBadge === 1,
+      guestNameRegistration: event.guestNameRegistration === 1,
+      tag: scannedTag ? {
+        tagCode: scannedTag.tagCode,
+        guestName: scannedTag.guestName || null
+      } : null
     });
   } catch (err) {
     console.error(err);
@@ -146,9 +211,10 @@ app.post('/api/events/:slug/verify-passcode', (req, res) => {
     }
 
     if (event.passcode === passcode) {
+      const cookieAge = (event.sessionDays || 7) * 24 * 60 * 60 * 1000;
       // Set authorization cookie
       res.cookie(`album_auth_${slug}`, 'true', {
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        maxAge: cookieAge,
         httpOnly: false,
         sameSite: 'lax'
       });
@@ -159,6 +225,37 @@ app.post('/api/events/:slug/verify-passcode', (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Database query failed.' });
+  }
+});
+
+/**
+ * PUT /api/events/:slug/tags/:tagCode/register
+ * Registers a guest name for a specific NFC tag code.
+ */
+app.put('/api/events/:slug/tags/:tagCode/register', (req, res) => {
+  const { slug, tagCode } = req.params;
+  const { guestName } = req.body;
+
+  if (!guestName || guestName.trim() === '') {
+    return res.status(400).json({ error: 'Guest name is required.' });
+  }
+
+  try {
+    const event = db.prepare('SELECT id FROM events WHERE slug = ?').get(slug);
+    if (!event) {
+      return res.status(404).json({ error: 'Event not found.' });
+    }
+
+    const tag = db.prepare('SELECT * FROM nfc_tags WHERE eventId = ? AND tagCode = ? AND active = 1').get(event.id, tagCode);
+    if (!tag) {
+      return res.status(404).json({ error: 'NFC tag code not found or inactive.' });
+    }
+
+    db.prepare('UPDATE nfc_tags SET guestName = ? WHERE id = ?').run(guestName.trim(), tag.id);
+    res.json({ success: true, tagCode, guestName: guestName.trim() });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Database update failed.' });
   }
 });
 
@@ -180,7 +277,13 @@ app.get('/api/events/:slug/uploads', (req, res) => {
       return res.status(403).json({ error: 'Unauthorized gallery access.' });
     }
 
-    const uploads = db.prepare('SELECT * FROM uploads WHERE eventId = ? ORDER BY createdAt DESC').all(event.id);
+    const uploads = db.prepare(`
+      SELECT u.*, t.guestName as tagGuestName
+      FROM uploads u
+      LEFT JOIN nfc_tags t ON u.tagCode = t.tagCode AND u.eventId = t.eventId
+      WHERE u.eventId = ?
+      ORDER BY u.createdAt DESC
+    `).all(event.id);
     res.json(uploads);
   } catch (err) {
     console.error(err);
@@ -201,9 +304,17 @@ app.post('/api/events/:slug/upload', upload.single('file'), async (req, res) => 
   }
 
   try {
-    const event = db.prepare('SELECT id, preset, isPrivate FROM events WHERE slug = ?').get(slug);
+    const event = db.prepare('SELECT id, preset, isPrivate, closesAt FROM events WHERE slug = ?').get(slug);
     if (!event) {
       return res.status(404).json({ error: 'Event not found.' });
+    }
+
+    // Check if upload window has closed
+    if (event.closesAt) {
+      const closesAtDate = new Date(event.closesAt);
+      if (closesAtDate < new Date()) {
+        return res.status(403).json({ error: 'The upload window has closed.' });
+      }
     }
 
     // Verify auth
@@ -321,14 +432,18 @@ app.get('/api/admin/events', authenticateAdmin, (req, res) => {
  * Creates a new event.
  */
 app.post('/api/admin/events', authenticateAdmin, (req, res) => {
-  const { title, slug, coverImage, preset, passcode, isPrivate } = req.body;
+  const { 
+    title, slug, preset, passcode, isPrivate,
+    date, eventType, sessionDays, closesAt,
+    bypassEnabled, showVerifiedBadge, guestNameRegistration 
+  } = req.body;
 
   if (!title) {
     return res.status(400).json({ error: 'Title is required.' });
   }
 
   const cleanSlug = (slug || title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')).trim();
-  const defaultCover = coverImage || 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=1200&auto=format&fit=crop';
+  const defaultCover = 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=1200&auto=format&fit=crop';
 
   try {
     // Check if slug is unique
@@ -339,9 +454,17 @@ app.post('/api/admin/events', authenticateAdmin, (req, res) => {
 
     const eventId = uuidv4();
     const insertEvent = db.prepare(`
-      INSERT INTO events (id, title, slug, coverImage, preset, passcode, isPrivate, createdAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (
+        id, title, slug, coverImage, preset, passcode, isPrivate, createdAt,
+        date, eventType, sessionDays, closesAt, bypassEnabled, showVerifiedBadge, guestNameRegistration
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
+
+    const isPrivateVal = (isPrivate === false || isPrivate === 0 || isPrivate === 'false') ? 0 : 1;
+    const bypassEnabledVal = (bypassEnabled === false || bypassEnabled === 0 || bypassEnabled === 'false') ? 0 : 1;
+    const showVerifiedBadgeVal = (showVerifiedBadge === false || showVerifiedBadge === 0 || showVerifiedBadge === 'false') ? 0 : 1;
+    const guestNameRegistrationVal = (guestNameRegistration === false || guestNameRegistration === 0 || guestNameRegistration === 'false') ? 0 : 1;
 
     insertEvent.run(
       eventId,
@@ -350,8 +473,15 @@ app.post('/api/admin/events', authenticateAdmin, (req, res) => {
       defaultCover,
       preset || '35mm-natural',
       passcode || null,
-      isPrivate === false ? 0 : 1,
-      new Date().toISOString()
+      isPrivateVal,
+      new Date().toISOString(),
+      date || null,
+      eventType || 'custom',
+      sessionDays !== undefined ? parseInt(sessionDays) : 7,
+      closesAt || null,
+      bypassEnabledVal,
+      showVerifiedBadgeVal,
+      guestNameRegistrationVal
     );
 
     const createdEvent = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
@@ -368,7 +498,11 @@ app.post('/api/admin/events', authenticateAdmin, (req, res) => {
  */
 app.put('/api/admin/events/:id', authenticateAdmin, (req, res) => {
   const { id } = req.params;
-  const { title, slug, coverImage, preset, passcode, isPrivate } = req.body;
+  const { 
+    title, slug, coverImage, preset, passcode, isPrivate,
+    date, eventType, sessionDays, closesAt,
+    bypassEnabled, showVerifiedBadge, guestNameRegistration 
+  } = req.body;
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(id);
@@ -388,9 +522,24 @@ app.put('/api/admin/events/:id', authenticateAdmin, (req, res) => {
 
     const updateEvent = db.prepare(`
       UPDATE events 
-      SET title = ?, slug = ?, coverImage = ?, preset = ?, passcode = ?, isPrivate = ?
+      SET title = ?, slug = ?, coverImage = ?, preset = ?, passcode = ?, isPrivate = ?,
+          date = ?, eventType = ?, sessionDays = ?, closesAt = ?, 
+          bypassEnabled = ?, showVerifiedBadge = ?, guestNameRegistration = ?
       WHERE id = ?
     `);
+
+    const isPrivateVal = isPrivate !== undefined 
+      ? ((isPrivate === false || isPrivate === 0 || isPrivate === 'false') ? 0 : 1)
+      : event.isPrivate;
+    const bypassEnabledVal = bypassEnabled !== undefined 
+      ? ((bypassEnabled === false || bypassEnabled === 0 || bypassEnabled === 'false') ? 0 : 1)
+      : event.bypassEnabled;
+    const showVerifiedBadgeVal = showVerifiedBadge !== undefined 
+      ? ((showVerifiedBadge === false || showVerifiedBadge === 0 || showVerifiedBadge === 'false') ? 0 : 1)
+      : event.showVerifiedBadge;
+    const guestNameRegistrationVal = guestNameRegistration !== undefined 
+      ? ((guestNameRegistration === false || guestNameRegistration === 0 || guestNameRegistration === 'false') ? 0 : 1)
+      : event.guestNameRegistration;
 
     updateEvent.run(
       title || event.title,
@@ -398,7 +547,14 @@ app.put('/api/admin/events/:id', authenticateAdmin, (req, res) => {
       coverImage !== undefined ? coverImage : event.coverImage,
       preset || event.preset,
       passcode !== undefined ? passcode : event.passcode,
-      isPrivate === false ? 0 : 1,
+      isPrivateVal,
+      date !== undefined ? date : event.date,
+      eventType !== undefined ? eventType : event.eventType,
+      sessionDays !== undefined ? parseInt(sessionDays) : event.sessionDays,
+      closesAt !== undefined ? closesAt : event.closesAt,
+      bypassEnabledVal,
+      showVerifiedBadgeVal,
+      guestNameRegistrationVal,
       id
     );
 

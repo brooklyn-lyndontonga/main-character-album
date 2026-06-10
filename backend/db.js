@@ -49,6 +49,39 @@ db.exec(`
   );
 `);
 
+// Add guestName column to nfc_tags if not exists
+try {
+  db.prepare("ALTER TABLE nfc_tags ADD COLUMN guestName TEXT").run();
+  console.log('Added guestName column to nfc_tags table.');
+} catch (err) {
+  // Ignore error if column already exists
+  if (!err.message.includes('duplicate column name')) {
+    console.warn("Migration warning:", err.message);
+  }
+}
+
+// Add new columns to events table if not exists
+const columnsToAdd = [
+  { name: 'date', type: 'TEXT' },
+  { name: 'eventType', type: 'TEXT' },
+  { name: 'sessionDays', type: 'INTEGER DEFAULT 7' },
+  { name: 'closesAt', type: 'TEXT' },
+  { name: 'bypassEnabled', type: 'INTEGER DEFAULT 1' },
+  { name: 'showVerifiedBadge', type: 'INTEGER DEFAULT 1' },
+  { name: 'guestNameRegistration', type: 'INTEGER DEFAULT 1' }
+];
+
+columnsToAdd.forEach(col => {
+  try {
+    db.prepare(`ALTER TABLE events ADD COLUMN ${col.name} ${col.type}`).run();
+    console.log(`Added ${col.name} column to events table.`);
+  } catch (err) {
+    if (!err.message.includes('duplicate column name')) {
+      console.warn(`Migration warning for column ${col.name}:`, err.message);
+    }
+  }
+});
+
 console.log('Database initialized successfully.');
 
 // Helper to seed template data if empty

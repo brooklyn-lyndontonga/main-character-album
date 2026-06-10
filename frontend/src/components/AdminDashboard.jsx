@@ -6,6 +6,63 @@ import {
   Tag, Download, Check, AlertCircle, LogOut, ExternalLink, RefreshCw
 } from 'lucide-react';
 
+// 4-digit Passcode Input sub-component
+function PasscodeInput({ passcode, setPasscode }) {
+  const digits = passcode.split('');
+  while (digits.length < 4) digits.push('');
+  
+  const handleDigitChange = (index, value) => {
+    const cleanVal = value.replace(/[^0-9]/g, '').slice(-1);
+    const newDigits = [...digits];
+    newDigits[index] = cleanVal;
+    
+    const newPasscode = newDigits.join('');
+    setPasscode(newPasscode);
+    
+    if (cleanVal && index < 3) {
+      const nextInput = document.getElementById(`passcode-digit-${index + 1}`);
+      if (nextInput) nextInput.focus();
+    }
+  };
+
+  const handleKeyDown = (index, e) => {
+    if (e.key === 'Backspace') {
+      if (!digits[index] && index > 0) {
+        const prevInput = document.getElementById(`passcode-digit-${index - 1}`);
+        if (prevInput) {
+          prevInput.focus();
+          const newDigits = [...digits];
+          newDigits[index - 1] = '';
+          setPasscode(newDigits.join(''));
+        }
+      } else {
+        const newDigits = [...digits];
+        newDigits[index] = '';
+        setPasscode(newDigits.join(''));
+      }
+    }
+  };
+
+  return (
+    <div className="flex gap-2 justify-center">
+      {[0, 1, 2, 3].map((idx) => (
+        <input
+          key={idx}
+          id={`passcode-digit-${idx}`}
+          type="text"
+          pattern="[0-9]*"
+          inputMode="numeric"
+          maxLength={1}
+          value={digits[idx]}
+          onChange={(e) => handleDigitChange(idx, e.target.value)}
+          onKeyDown={(e) => handleKeyDown(idx, e)}
+          className="w-12 h-12 text-center text-lg font-bold text-white rounded-xl bg-zinc-950 border border-white/10 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-mono"
+        />
+      ))}
+    </div>
+  );
+}
+
 function AdminDashboard({ navigate }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState('');
@@ -18,15 +75,49 @@ function AdminDashboard({ navigate }) {
   
   // Form State (Event Creation / Editing)
   const [editingId, setEditingId] = useState(null); // null if creating
+  const [template, setTemplate] = useState('custom');
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
-  const [coverImage, setCoverImage] = useState('');
   const [preset, setPreset] = useState('35mm-natural');
   const [passcode, setPasscode] = useState('');
   const [isPrivate, setIsPrivate] = useState(true);
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
   const [submittingForm, setSubmittingForm] = useState(false);
+
+  // New Event Form Configuration States
+  const [date, setDate] = useState('');
+  const [eventType, setEventType] = useState('custom');
+  const [sessionDays, setSessionDays] = useState(7);
+  const [closesAt, setClosesAt] = useState('');
+  const [bypassEnabled, setBypassEnabled] = useState(true);
+  const [showVerifiedBadge, setShowVerifiedBadge] = useState(true);
+  const [guestNameRegistration, setGuestNameRegistration] = useState(true);
+  const [initialTagCount, setInitialTagCount] = useState(30);
+  const [usePasscode, setUsePasscode] = useState(false);
+
+  // Card Cover Editor State
+  const [editingCoverId, setEditingCoverId] = useState(null);
+  const [tempCoverUrl, setTempCoverUrl] = useState('');
+
+  const handleUpdateCover = async (eventId, coverUrl) => {
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coverImage: coverUrl })
+      });
+      if (res.ok) {
+        setEditingCoverId(null);
+        fetchEvents();
+      } else {
+        alert('Failed to update cover image.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error updating cover.');
+    }
+  };
 
   // NFC Tags Management State
   const [selectedEventForTags, setSelectedEventForTags] = useState(null);
@@ -114,6 +205,8 @@ function AdminDashboard({ navigate }) {
     }
   };
 
+
+
   // Create / Update Event Form Submit
   const handleFormSubmit = async (e) => {
     e.preventDefault();
@@ -124,10 +217,16 @@ function AdminDashboard({ navigate }) {
     const body = {
       title,
       slug: slug.trim() || undefined,
-      coverImage: coverImage.trim() || undefined,
       preset,
-      passcode: passcode.trim() || undefined,
-      isPrivate
+      passcode: usePasscode && passcode.trim() ? passcode.trim() : null,
+      isPrivate,
+      date: date || null,
+      eventType,
+      sessionDays: parseInt(sessionDays) || 7,
+      closesAt: closesAt || null,
+      bypassEnabled,
+      showVerifiedBadge,
+      guestNameRegistration
     };
 
     try {
@@ -147,6 +246,19 @@ function AdminDashboard({ navigate }) {
       }
 
       setFormSuccess(editingId ? 'Event updated successfully!' : 'Event created successfully!');
+
+      // If template/creation had initial tag count configured, generate them
+      if (!editingId && initialTagCount > 0) {
+        try {
+          await fetch(`/api/admin/events/${data.id}/tags`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ count: initialTagCount })
+          });
+        } catch (err) {
+          console.error("Initial tag generation failed:", err);
+        }
+      }
       
       // Clear form
       resetForm();
@@ -161,14 +273,65 @@ function AdminDashboard({ navigate }) {
     }
   };
 
+  const handleTemplateChange = (val) => {
+    setTemplate(val);
+    setEventType(val);
+    if (val === 'birthday') {
+      setPreset('35mm-natural');
+      setIsPrivate(true);
+      setPasscode('2121');
+      setSessionDays(7);
+      setBypassEnabled(true);
+      setShowVerifiedBadge(true);
+      setGuestNameRegistration(true);
+      setInitialTagCount(30);
+    } else if (val === 'wedding') {
+      setPreset('cinematic-portrait');
+      setIsPrivate(true);
+      setPasscode('7777');
+      setSessionDays(14);
+      setBypassEnabled(true);
+      setShowVerifiedBadge(true);
+      setGuestNameRegistration(true);
+      setInitialTagCount(100);
+    } else if (val === 'corporate') {
+      setPreset('pristine-digital');
+      setIsPrivate(true);
+      setPasscode('9999');
+      setSessionDays(3);
+      setBypassEnabled(false);
+      setShowVerifiedBadge(false);
+      setGuestNameRegistration(true);
+      setInitialTagCount(150);
+    } else if (val === 'custom') {
+      setPreset('35mm-natural');
+      setIsPrivate(true);
+      setPasscode('');
+      setSessionDays(7);
+      setBypassEnabled(true);
+      setShowVerifiedBadge(true);
+      setGuestNameRegistration(true);
+      setInitialTagCount(30);
+    }
+  };
+
   const resetForm = () => {
     setEditingId(null);
+    setTemplate('custom');
+    setEventType('custom');
     setTitle('');
     setSlug('');
-    setCoverImage('');
     setPreset('35mm-natural');
     setPasscode('');
     setIsPrivate(true);
+    setDate('');
+    setSessionDays(7);
+    setClosesAt('');
+    setBypassEnabled(true);
+    setShowVerifiedBadge(true);
+    setGuestNameRegistration(true);
+    setInitialTagCount(30);
+    setUsePasscode(false);
     setFormError('');
   };
 
@@ -176,10 +339,20 @@ function AdminDashboard({ navigate }) {
     setEditingId(ev.id);
     setTitle(ev.title);
     setSlug(ev.slug);
-    setCoverImage(ev.coverImage || '');
     setPreset(ev.preset);
     setPasscode(ev.passcode || '');
     setIsPrivate(ev.isPrivate === 1);
+    
+    // New fields
+    setEventType(ev.eventType || 'custom');
+    setTemplate(ev.eventType || 'custom');
+    setDate(ev.date || '');
+    setSessionDays(ev.sessionDays !== undefined ? ev.sessionDays : 7);
+    setClosesAt(ev.closesAt || '');
+    setBypassEnabled(ev.bypassEnabled === 1);
+    setShowVerifiedBadge(ev.showVerifiedBadge === 1);
+    setGuestNameRegistration(ev.guestNameRegistration === 1);
+    setUsePasscode(!!ev.passcode);
     
     // Smooth scroll up to form
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -307,13 +480,182 @@ function AdminDashboard({ navigate }) {
     img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgData)));
   };
 
-  // Maps preset codes to aesthetic name descriptions
-  const PRESETS = [
-    { value: '35mm-natural', label: '35mm Negative' },
-    { value: '35mm-flash', label: 'Night-Flash' },
-    { value: 'pristine-digital', label: 'Pristine Digital' },
-    { value: 'cinematic-portrait', label: 'Cinematic Portrait' }
-  ];
+  // Export bulk CSV of all tags
+  const downloadTagsCSV = (tagsList, ev) => {
+    if (!tagsList || tagsList.length === 0) {
+      alert("No tag keys exist to export!");
+      return;
+    }
+    const headers = ['Tag Code', 'Write URL', 'Guest Name', 'Created At'];
+    const rows = tagsList.map(tag => [
+      tag.tagCode,
+      `${window.location.origin}/e/${ev.slug}?t=${tag.tagCode}`,
+      tag.guestName || '',
+      tag.createdAt
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + [headers.join(','), ...rows.map(e => e.map(val => `"${val.toString().replace(/"/g, '""')}"`).join(','))].join('\n');
+    
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `nfc-tags-${ev.slug}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Print multi-up sheet of QR code labels (Avery 5160)
+  const printAverySheet = (tagsList, ev) => {
+    if (!tagsList || tagsList.length === 0) {
+      alert("No tag keys exist to print!");
+      return;
+    }
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Popup blocked. Please enable popups to print labels.');
+      return;
+    }
+
+    const labelHtml = tagsList.map(tag => {
+      const svg = document.getElementById(`qr-${tag.tagCode}`);
+      let qrDataUrl = '';
+      if (svg) {
+        const svgData = new XMLSerializer().serializeToString(svg);
+        qrDataUrl = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgData)));
+      }
+      return `
+        <div class="avery-label">
+          <div class="label-content">
+            <img src="${qrDataUrl}" class="qr-img" />
+            <div class="label-details">
+              <div class="label-header">TAP KEYRING</div>
+              <div class="label-subheader">OR SCAN BACK</div>
+              <div class="tag-code">KEY: ${tag.tagCode}</div>
+              <div class="instructions">No tap? Scan back or use passcode</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Print QR Labels - ${ev.title}</title>
+          <style>
+            @page {
+              size: letter;
+              margin: 0;
+            }
+            body {
+              margin: 0;
+              padding: 0;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+              background-color: white;
+              color: black;
+            }
+            /* Avery 5160 Layout (3 columns, 10 rows) */
+            .sheet {
+              width: 8.5in;
+              height: 11in;
+              box-sizing: border-box;
+              padding-top: 0.5in;
+              padding-left: 0.219in;
+              padding-right: 0.219in;
+              display: grid;
+              grid-template-columns: 2.625in 2.625in 2.625in;
+              grid-column-gap: 0.14in;
+              grid-row-gap: 0;
+              justify-content: start;
+              align-content: start;
+            }
+            .avery-label {
+              width: 2.625in;
+              height: 1in;
+              box-sizing: border-box;
+              padding: 0.08in 0.1in;
+              overflow: hidden;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              border: 1px dashed #eee;
+            }
+            @media print {
+              .avery-label {
+                border: 1px solid transparent;
+              }
+            }
+            .label-content {
+              display: flex;
+              align-items: center;
+              width: 100%;
+              height: 100%;
+              gap: 0.1in;
+            }
+            .qr-img {
+              width: 0.82in;
+              height: 0.82in;
+              flex-shrink: 0;
+            }
+            .label-details {
+              display: flex;
+              flex-direction: column;
+              justify-content: center;
+              min-width: 0;
+              flex-grow: 1;
+            }
+            .label-header {
+              font-size: 10px;
+              font-weight: 800;
+              letter-spacing: 0.5px;
+              color: #b48a04;
+              text-transform: uppercase;
+            }
+            .label-subheader {
+              font-size: 8px;
+              font-weight: 600;
+              color: #111;
+              margin-top: 1px;
+            }
+            .tag-code {
+              font-family: monospace;
+              font-size: 9px;
+              font-weight: 700;
+              background: #f0f0f0;
+              padding: 1px 3px;
+              border-radius: 3px;
+              display: inline-block;
+              margin-top: 3px;
+              align-self: start;
+            }
+            .instructions {
+              font-size: 6px;
+              color: #555;
+              margin-top: 4px;
+              line-height: 1.1;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="sheet">
+            ${labelHtml}
+          </div>
+          <script>
+            window.onload = function() {
+              setTimeout(function() {
+                window.print();
+              }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+
 
   // -------------------------------------------------------------
   // SECURE SHIELD: PASSWORD SIGN IN SCREEN
@@ -452,103 +794,306 @@ function AdminDashboard({ navigate }) {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         
         {/* Left Side: Create / Edit Event Form */}
-        <section className="lg:col-span-4 glass-premium p-6 rounded-3xl border border-white/15">
-          <div className="flex items-center gap-2 mb-5">
+        <section className="lg:col-span-5 glass-premium p-6 rounded-3xl border border-white/15">
+          <div className="flex items-center gap-2 mb-6">
             <Settings className="w-4 h-4 text-amber-500" />
             <h3 className="text-sm font-bold tracking-wider text-zinc-100 uppercase">
               {editingId ? 'Modify Event Space' : 'New Event Space'}
             </h3>
           </div>
 
-          <form onSubmit={handleFormSubmit} className="space-y-4">
-            <div>
-              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">
-                EVENT TITLE *
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. Mere & Wiremu Wedding"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full py-2.5 px-3.5 rounded-xl text-sm text-white glass-input font-light placeholder:text-zinc-600"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">
-                ALBUM SLUG / CODE (OPTIONAL)
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. wedding-2026"
-                value={slug}
-                onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''))}
-                className="w-full py-2.5 px-3.5 rounded-xl text-sm text-white glass-input font-light placeholder:text-zinc-600"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">
-                COVER IMAGE URL (OPTIONAL)
-              </label>
-              <input
-                type="url"
-                placeholder="Leave blank for random background"
-                value={coverImage}
-                onChange={(e) => setCoverImage(e.target.value)}
-                className="w-full py-2.5 px-3.5 rounded-xl text-sm text-white glass-input font-light placeholder:text-zinc-600"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">
-                AESTHETIC PRESET FILTER *
-              </label>
-              <select
-                value={preset}
-                onChange={(e) => setPreset(e.target.value)}
-                className="w-full py-2.5 px-3.5 rounded-xl text-sm text-white glass-input font-light bg-zinc-950/80 border border-white/10 outline-none"
-              >
-                {PRESETS.map((p) => (
-                  <option key={p.value} value={p.value} className="bg-zinc-900 text-zinc-200">
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">
-                EVENT PASSCODE (OPTIONAL BYPASS)
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. 2026"
-                maxLength={8}
-                value={passcode}
-                onChange={(e) => setPasscode(e.target.value.replace(/[^0-9]/g, ''))}
-                className="w-full py-2.5 px-3.5 rounded-xl text-sm text-white glass-input font-light placeholder:text-zinc-600 text-center font-mono tracking-wider"
-              />
-            </div>
-
-            {/* Toggle Private / Public */}
-            <div className="flex items-center justify-between py-2 border-y border-white/5">
-              <div>
-                <span className="block text-xs font-semibold text-zinc-300">Private Album Only</span>
-                <span className="text-[10px] text-zinc-500 font-light">Requires NFC scan or Passcode</span>
+          <form onSubmit={handleFormSubmit} className="space-y-6">
+            
+            {/* SECTION 1: IDENTITY */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                <span className="w-5 h-5 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center text-xs font-bold font-mono">1</span>
+                <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-widest">Identity</h4>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsPrivate(!isPrivate)}
-                className="text-zinc-400 hover:text-white transition-all cursor-pointer"
-              >
-                {isPrivate ? (
-                  <ToggleRight className="w-9 h-9 text-amber-500 fill-amber-500/20" />
-                ) : (
-                  <ToggleLeft className="w-9 h-9 text-zinc-600" />
-                )}
-              </button>
+
+              {!editingId && (
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">
+                    EVENT TEMPLATE PRESET
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { value: 'custom', label: '✨ Custom' },
+                      { value: 'birthday', label: '🎂 Birthday' },
+                      { value: 'wedding', label: '💍 Wedding' },
+                      { value: 'corporate', label: '💼 Corporate' }
+                    ].map((t) => (
+                      <button
+                        key={t.value}
+                        type="button"
+                        onClick={() => handleTemplateChange(t.value)}
+                        className={`py-2 px-3 rounded-xl border text-center text-xs font-semibold transition-all cursor-pointer ${
+                          template === t.value 
+                            ? 'border-amber-500 bg-amber-500/10 text-white font-bold' 
+                            : 'border-white/5 bg-zinc-950/20 text-zinc-400 hover:bg-zinc-950/40'
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">
+                  EVENT TITLE *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Mere & Wiremu Wedding"
+                  value={title}
+                  onChange={(e) => {
+                    setTitle(e.target.value);
+                    if (!editingId) {
+                      setSlug(e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''));
+                    }
+                  }}
+                  className="w-full py-2.5 px-3.5 rounded-xl text-sm text-white glass-input font-light placeholder:text-zinc-600"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">
+                  ALBUM SLUG / CODE (URL SAFE)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. wedding-2026"
+                  value={slug}
+                  onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''))}
+                  className="w-full py-2.5 px-3.5 rounded-xl text-sm text-white glass-input font-light placeholder:text-zinc-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">
+                  EVENT DATE
+                </label>
+                <input
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="w-full py-2.5 px-3.5 rounded-xl text-sm text-white glass-input font-light placeholder:text-zinc-600"
+                />
+              </div>
+            </div>
+
+            {/* SECTION 2: ACCESS */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                <span className="w-5 h-5 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center text-xs font-bold font-mono">2</span>
+                <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-widest">Access Control</h4>
+              </div>
+
+              <div className="flex items-center justify-between py-1.5">
+                <div>
+                  <span className="block text-xs font-semibold text-zinc-300">Private Album Only</span>
+                  <span className="text-[10px] text-zinc-500 font-light">Requires NFC scan or Passcode</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPrivate(!isPrivate)}
+                  className="text-zinc-400 hover:text-white transition-all cursor-pointer"
+                >
+                  {isPrivate ? (
+                    <ToggleRight className="w-9 h-9 text-amber-500 fill-amber-500/20" />
+                  ) : (
+                    <ToggleLeft className="w-9 h-9 text-zinc-600" />
+                  )}
+                </button>
+              </div>
+
+              {isPrivate && (
+                <>
+                  <div className="flex items-center justify-between py-1.5">
+                    <div>
+                      <span className="block text-xs font-semibold text-zinc-300">Passcode Fallback</span>
+                      <span className="text-[10px] text-zinc-500 font-light">Allow entry via manual passcode</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextState = !usePasscode;
+                        setUsePasscode(nextState);
+                        if (!nextState) setPasscode('');
+                        else if (!passcode) setPasscode('1234');
+                      }}
+                      className="text-zinc-400 hover:text-white transition-all cursor-pointer"
+                    >
+                      {usePasscode ? (
+                        <ToggleRight className="w-9 h-9 text-amber-500 fill-amber-500/20" />
+                      ) : (
+                        <ToggleLeft className="w-9 h-9 text-zinc-600" />
+                      )}
+                    </button>
+                  </div>
+
+                  {usePasscode && (
+                    <div className="space-y-3 p-3 bg-zinc-950/40 border border-white/5 rounded-2xl">
+                      <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-center">
+                        Configure 4-Digit Passcode
+                      </label>
+                      <PasscodeInput passcode={passcode} setPasscode={setPasscode} />
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div>
+                <div className="flex justify-between text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">
+                  <span>SESSION COOKIE LIFESPAN</span>
+                  <span className="text-amber-500 font-mono">{sessionDays} days</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={30}
+                  value={sessionDays}
+                  onChange={(e) => setSessionDays(parseInt(e.target.value))}
+                  className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">
+                  UPLOAD WINDOW CLOSES (DATE & TIME)
+                </label>
+                <input
+                  type="datetime-local"
+                  value={closesAt}
+                  onChange={(e) => setClosesAt(e.target.value)}
+                  className="w-full py-2.5 px-3.5 rounded-xl text-sm text-white glass-input font-light"
+                />
+              </div>
+            </div>
+
+            {/* SECTION 3: AESTHETIC PRESET */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                <span className="w-5 h-5 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center text-xs font-bold font-mono">3</span>
+                <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-widest">Aesthetic Preset</h4>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { value: '35mm-natural', label: '35mm Negative', description: 'Warm vintage film tones, soft skin rendering, classic grain.', color: 'from-amber-600 to-orange-700' },
+                  { value: '35mm-flash', label: 'Night-Flash', description: 'Raw party flash, high contrast, slight vignette, retro vibes.', color: 'from-blue-600 to-indigo-700' },
+                  { value: 'pristine-digital', label: 'Pristine Digital', description: 'Modern digital sharpness, crisp details, natural colors.', color: 'from-emerald-600 to-teal-700' },
+                  { value: 'cinematic-portrait', label: 'Cinematic Portrait', description: 'Moody cinematic shadow depth, muted highlights, dramatic look.', color: 'from-purple-600 to-pink-700' }
+                ].map((p) => {
+                  const isSelected = preset === p.value;
+                  return (
+                    <button
+                      key={p.value}
+                      type="button"
+                      onClick={() => setPreset(p.value)}
+                      className={`p-3 rounded-xl border text-left flex flex-col justify-between h-28 transition-all cursor-pointer relative overflow-hidden select-none ${
+                        isSelected 
+                          ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500' 
+                          : 'border-white/5 bg-zinc-950/40 hover:bg-zinc-950/60'
+                      }`}
+                    >
+                      <div className={`absolute top-0 right-0 w-16 h-16 bg-gradient-to-br ${p.color} opacity-20 blur-md rounded-full`} />
+                      <div>
+                        <span className="block text-xs font-bold text-white mb-1">{p.label}</span>
+                        <span className="block text-[9px] text-zinc-500 leading-snug font-light">{p.description}</span>
+                      </div>
+                      {isSelected && (
+                        <span className="self-end bg-amber-500 text-black p-0.5 rounded-full z-10">
+                          <Check className="w-2.5 h-2.5" />
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* SECTION 4: NFC TAGS & BEHAVIOR */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                <span className="w-5 h-5 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center text-xs font-bold font-mono">4</span>
+                <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-widest">NFC & Guest Settings</h4>
+              </div>
+
+              {!editingId && (
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">
+                    SUGGESTED KEYRINGS TO GENERATE
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={200}
+                    value={initialTagCount}
+                    onChange={(e) => setInitialTagCount(Math.max(0, parseInt(e.target.value) || 0))}
+                    className="w-full py-2.5 px-3.5 rounded-xl text-sm text-white glass-input font-light placeholder:text-zinc-600"
+                  />
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between py-1 border-b border-white/5">
+                  <div>
+                    <span className="block text-xs font-semibold text-zinc-300">NFC Bypass Passcode</span>
+                    <span className="text-[10px] text-zinc-500 font-light">Tag scans automatically authorize</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setBypassEnabled(!bypassEnabled)}
+                    className="text-zinc-400 hover:text-white transition-all cursor-pointer"
+                  >
+                    {bypassEnabled ? (
+                      <ToggleRight className="w-9 h-9 text-amber-500 fill-amber-500/20" />
+                    ) : (
+                      <ToggleLeft className="w-9 h-9 text-zinc-600" />
+                    )}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between py-1 border-b border-white/5">
+                  <div>
+                    <span className="block text-xs font-semibold text-zinc-300">Show Verified Badge</span>
+                    <span className="text-[10px] text-zinc-500 font-light">Show "NFC Verified" on gallery snaps</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowVerifiedBadge(!showVerifiedBadge)}
+                    className="text-zinc-400 hover:text-white transition-all cursor-pointer"
+                  >
+                    {showVerifiedBadge ? (
+                      <ToggleRight className="w-9 h-9 text-amber-500 fill-amber-500/20" />
+                    ) : (
+                      <ToggleLeft className="w-9 h-9 text-zinc-600" />
+                    )}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between py-1">
+                  <div>
+                    <span className="block text-xs font-semibold text-zinc-300">Guest Name Registration</span>
+                    <span className="text-[10px] text-zinc-500 font-light">Prompt for guest name on tag scan</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setGuestNameRegistration(!guestNameRegistration)}
+                    className="text-zinc-400 hover:text-white transition-all cursor-pointer"
+                  >
+                    {guestNameRegistration ? (
+                      <ToggleRight className="w-9 h-9 text-amber-500 fill-amber-500/20" />
+                    ) : (
+                      <ToggleLeft className="w-9 h-9 text-zinc-600" />
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
 
             {formError && (
@@ -588,7 +1133,7 @@ function AdminDashboard({ navigate }) {
         </section>
 
         {/* Right Side: Active Events List Grid */}
-        <section className="lg:col-span-8 space-y-6">
+        <section className="lg:col-span-7 space-y-6">
           
           {/* Main events table list */}
           <div className="glass p-6 rounded-3xl border border-white/5">
@@ -633,6 +1178,44 @@ function AdminDashboard({ navigate }) {
                             {ev.totalUploads} snaps
                           </span>
                         </div>
+
+                        {/* Cover Image Editor */}
+                        {editingCoverId === ev.id ? (
+                          <div className="flex items-center gap-2 mt-2 w-full max-w-sm">
+                            <input
+                              type="url"
+                              value={tempCoverUrl}
+                              onChange={(e) => setTempCoverUrl(e.target.value)}
+                              placeholder="Cover Image URL"
+                              className="flex-1 py-1 px-2.5 rounded-lg text-xs text-white glass-input font-light outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateCover(ev.id, tempCoverUrl)}
+                              className="px-2 py-1 rounded bg-amber-500 hover:bg-amber-400 text-black text-[9px] font-bold transition-all cursor-pointer"
+                            >
+                              SAVE
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingCoverId(null)}
+                              className="px-2 py-1 rounded glass text-zinc-400 text-[9px] font-bold transition-all cursor-pointer"
+                            >
+                              CANCEL
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCoverId(ev.id);
+                              setTempCoverUrl(ev.coverImage || '');
+                            }}
+                            className="text-[9px] text-zinc-500 hover:text-zinc-300 flex items-center gap-1 mt-1.5 font-medium underline transition-all cursor-pointer"
+                          >
+                            Change Cover Image URL
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -701,6 +1284,24 @@ function AdminDashboard({ navigate }) {
                   className="text-xs text-zinc-500 hover:text-zinc-400 font-semibold"
                 >
                   CLOSE
+                </button>
+              </div>
+
+              {/* Batch Prep Operations */}
+              <div className="grid grid-cols-2 gap-3 mb-6 pb-4 border-b border-white/5">
+                <button
+                  onClick={() => downloadTagsCSV(tags, selectedEventForTags)}
+                  className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 py-2.5 rounded-xl text-xs font-bold tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  EXPORT BULK CSV
+                </button>
+                <button
+                  onClick={() => printAverySheet(tags, selectedEventForTags)}
+                  className="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 py-2.5 rounded-xl text-xs font-bold tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Tag className="w-4 h-4" />
+                  PRINT AVERY SHEET
                 </button>
               </div>
 

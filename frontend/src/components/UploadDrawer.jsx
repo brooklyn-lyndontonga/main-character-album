@@ -8,10 +8,15 @@ const PRESET_LABELS = {
   'cinematic-portrait': 'Cinematic Portrait'
 };
 
-function UploadDrawer({ isOpen, onClose, slug, tagCode, preset, onUploadSuccess }) {
+// Pure helper function for offline spool ID generation
+const generateTempId = () => {
+  return `spool_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+};
+
+function UploadDrawer({ isOpen, onClose, slug, tagCode, guestName, preset, isClosed, onUploadSuccess }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState('');
-  const [uploaderName, setUploaderName] = useState('');
+  const [uploaderName, setUploaderName] = useState(guestName || '');
   const [caption, setCaption] = useState('');
   
   // Upload status states
@@ -50,6 +55,11 @@ function UploadDrawer({ isOpen, onClose, slug, tagCode, preset, onUploadSuccess 
   // Submit Handler
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isClosed) {
+      setErrorMessage('The upload window has closed.');
+      setStatus('error');
+      return;
+    }
     if (!file) return;
 
     setStatus('uploading');
@@ -113,7 +123,7 @@ function UploadDrawer({ isOpen, onClose, slug, tagCode, preset, onUploadSuccess 
       console.warn('UploadDrawer offline or failed. Spooling to localStorage...', err);
       
       // Construct a spooled item
-      const tempId = `spool_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const tempId = generateTempId();
       const spooledItem = {
         id: tempId,
         imageUrl: preview, // base64 JPEG from FileReader
@@ -234,6 +244,17 @@ function UploadDrawer({ isOpen, onClose, slug, tagCode, preset, onUploadSuccess 
               <h4 className="text-lg font-bold text-white mb-1">Snapshot Preserved!</h4>
               <p className="text-zinc-500 text-xs font-light">Memory successfully blended into the event feed.</p>
             </div>
+          ) : isClosed ? (
+            /* Closed screen */
+            <div className="py-12 text-center flex flex-col items-center justify-center">
+              <div className="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-full flex items-center justify-center mb-4">
+                <AlertCircle className="w-8 h-8 stroke-[1.5]" />
+              </div>
+              <h4 className="text-lg font-bold text-white mb-2">Upload Window Closed</h4>
+              <p className="text-zinc-550 text-xs font-light max-w-[280px] leading-relaxed">
+                This memory space is now in **Archive Mode**. The upload window has closed and new uploads are disabled.
+              </p>
+            </div>
           ) : (
             /* Form screen */
             <form onSubmit={handleSubmit} className="space-y-5">
@@ -303,8 +324,14 @@ function UploadDrawer({ isOpen, onClose, slug, tagCode, preset, onUploadSuccess 
                     placeholder="Enter your name"
                     value={uploaderName}
                     onChange={(e) => setUploaderName(e.target.value)}
-                    className="w-full py-2.5 px-3.5 rounded-xl text-sm text-white glass-input font-light placeholder:text-zinc-600"
+                    className="w-full py-2.5 px-3.5 rounded-xl text-sm text-white glass-input font-light placeholder:text-zinc-600 disabled:opacity-50 disabled:text-zinc-400"
+                    disabled={!!guestName}
                   />
+                  {guestName && (
+                    <span className="text-[10px] text-amber-500 font-bold tracking-wider mt-1.5 block">
+                      ✓ Linked to NFC Keyring ({guestName})
+                    </span>
+                  )}
                 </div>
 
                 <div>

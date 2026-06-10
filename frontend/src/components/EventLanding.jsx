@@ -15,6 +15,12 @@ function EventLanding({ slug, tagCode, navigate }) {
   const [passcodeError, setPasscodeError] = useState('');
   const [passcodeSubmitting, setPasscodeSubmitting] = useState(false);
 
+  // One-time Name Registration state
+  const [showNameRegistration, setShowNameRegistration] = useState(false);
+  const [guestNameInput, setGuestNameInput] = useState('');
+  const [registeringName, setRegisteringName] = useState(false);
+  const [registeredGuestName, setRegisteredGuestName] = useState('');
+
   // Modal drawers & viewer states
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(null);
@@ -60,9 +66,26 @@ function EventLanding({ slug, tagCode, navigate }) {
       
       setEvent(data);
       
-      // If we are authorized, load gallery
+      // If we are authorized, load gallery and check name registration
       if (!data.requiresPasscode) {
         await fetchUploads();
+
+        if (data.tag) {
+          const resolvedTagCode = data.tag.tagCode;
+          if (!data.tag.guestName) {
+            const localRegName = localStorage.getItem(`nfc_registered_name_${slug}_${resolvedTagCode}`);
+            if (!localRegName) {
+              if (data.guestNameRegistration) {
+                setShowNameRegistration(true);
+              }
+            } else {
+              setRegisteredGuestName(localRegName);
+            }
+          } else {
+            setRegisteredGuestName(data.tag.guestName);
+            localStorage.setItem(`nfc_registered_name_${slug}_${resolvedTagCode}`, data.tag.guestName);
+          }
+        }
       }
     } catch (err) {
       console.error(err);
@@ -206,6 +229,38 @@ function EventLanding({ slug, tagCode, navigate }) {
     }
   };
 
+  // Handle guest name registration
+  const handleNameRegisterSubmit = async (e) => {
+    e.preventDefault();
+    if (!guestNameInput.trim()) return;
+
+    setRegisteringName(true);
+    try {
+      const activeTagCode = event.tag?.tagCode || tagCode;
+      if (!activeTagCode) throw new Error("No active tag code to register name against");
+
+      const res = await fetch(`/api/events/${slug}/tags/${activeTagCode}/register`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guestName: guestNameInput.trim() })
+      });
+
+      if (res.ok) {
+        setRegisteredGuestName(guestNameInput.trim());
+        localStorage.setItem(`nfc_registered_name_${slug}_${activeTagCode}`, guestNameInput.trim());
+        setShowNameRegistration(false);
+        await fetchEventData(); // Sync backend state
+      } else {
+        alert("Could not register name. Please try again.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Registration failed.");
+    } finally {
+      setRegisteringName(false);
+    }
+  };
+
   const handleRefresh = async () => {
     setRefreshing(true);
     await fetchUploads();
@@ -337,11 +392,16 @@ function EventLanding({ slug, tagCode, navigate }) {
             </button>
           </form>
 
-          <div className="mt-8 pt-6 border-t border-white/5 flex flex-col gap-2 items-center">
-            <span className="text-[10px] uppercase tracking-widest text-zinc-600">HOW DO I ACCESS?</span>
-            <p className="text-zinc-500 text-[11px] font-light max-w-70">
-              Tap the physical **NFC keyring** that was given to you for this event to instantly bypass this passcode screen!
+          <div className="mt-8 pt-6 border-t border-white/5 flex flex-col gap-3 items-center">
+            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Tap Instructions & Troubleshooting</span>
+            <p className="text-zinc-500 text-[11px] font-light max-w-xs leading-normal">
+              Tap the physical **NFC keyring** that was given to you against your phone to instantly bypass this passcode screen!
             </p>
+            <div className="text-zinc-600 text-[10px] font-light max-w-xs space-y-1.5 text-left border border-white/5 p-3 rounded-xl bg-zinc-950/45">
+              <p>• **iPhone XS & newer**: Tap the top-rear edge against the keyring. NFC is active automatically.</p>
+              <p>• **Android devices**: Verify NFC is toggled ON in Quick Settings, then tap the center-back of the phone.</p>
+              <p>• **Older devices (iPhone 8 or older)**: Use your Camera app to scan the QR code sticker on the keyring instead.</p>
+            </div>
           </div>
         </div>
       </div>
@@ -351,6 +411,7 @@ function EventLanding({ slug, tagCode, navigate }) {
   // FULLY AUTHORIZED GUEST HOME SCREEN
   const styles = getPresetStyles(event.preset);
   const hasGrain = event.preset !== 'pristine-digital' && event.preset !== 'cinematic-portrait';
+  const isClosed = event?.closesAt ? new Date(event.closesAt) < new Date() : false;
 
   return (
     <div className={`flex-1 flex flex-col pb-24 relative ${hasGrain ? 'film-grain' : 'no-grain'}`}>
@@ -412,6 +473,13 @@ function EventLanding({ slug, tagCode, navigate }) {
 
       {/* Main Content Area */}
       <main className="p-6 md:p-10 max-w-6xl mx-auto w-full relative z-20">
+        {isClosed && (
+          <div className="glass p-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 mb-6 text-center select-none flex items-center justify-center gap-2 text-xs text-amber-500 font-semibold tracking-wider uppercase">
+            <Lock className="w-4 h-4" />
+            This album is in Archive Mode. The upload window closed on {new Date(event.closesAt).toLocaleString()}.
+          </div>
+        )}
+
         {uploads.length === 0 ? (
           <div className="glass p-12 rounded-3xl text-center max-w-md mx-auto my-12 border border-white/5 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl" />
@@ -420,15 +488,22 @@ function EventLanding({ slug, tagCode, navigate }) {
             </div>
             <h3 className="text-lg font-semibold text-zinc-200 mb-2">No memories captured yet</h3>
             <p className="text-zinc-500 text-xs leading-relaxed mb-6 font-light max-w-70 mx-auto">
-              Be the very first main character! Tap the floating camera button to contribute to this archive.
+              {!isClosed 
+                ? "Be the very first main character! Tap the floating camera button to contribute to this archive."
+                : "No snapshots were uploaded during the active window."
+              }
             </p>
-            <button
-              onClick={() => setIsUploadOpen(true)}
-              className="bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold px-6 py-3 rounded-xl shadow-lg active:scale-95 transition-all flex items-center gap-2 mx-auto cursor-pointer"
-            >
-              <Camera className="w-4 h-4" />
-              UPLOAD FIRST MEMORY
-            </button>
+            {!isClosed ? (
+              <button
+                onClick={() => setIsUploadOpen(true)}
+                className="bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold px-6 py-3 rounded-xl shadow-lg active:scale-95 transition-all flex items-center gap-2 mx-auto cursor-pointer"
+              >
+                <Camera className="w-4 h-4" />
+                UPLOAD FIRST MEMORY
+              </button>
+            ) : (
+              <span className="text-[10px] text-zinc-650 font-bold uppercase tracking-widest">Uploads Closed</span>
+            )}
           </div>
         ) : (
           <Gallery 
@@ -440,25 +515,27 @@ function EventLanding({ slug, tagCode, navigate }) {
       </main>
 
       {/* Floating Action Button (Camera Upload) */}
-      <div className="fixed bottom-6 right-6 z-50">
-        <button
-          onClick={() => setIsUploadOpen(true)}
-          className="w-14 h-14 rounded-full bg-linear-to-tr from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black flex items-center justify-center shadow-[0_8px_32px_rgba(245,158,11,0.4)] active:scale-90 hover:scale-105 transition-all duration-300 cursor-pointer relative group border-2 border-black"
-          aria-label="Upload Photo or Video"
-        >
-          <Camera className="w-6 h-6 stroke-2" />
-          <span className="absolute -top-10 right-0 bg-zinc-950 text-white text-[10px] font-bold tracking-widest px-2.5 py-1.5 rounded-lg border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none uppercase whitespace-nowrap shadow-xl">
-            ADD SNAPSHOT
-          </span>
-        </button>
-      </div>
+      {!isClosed && (
+        <div className="fixed bottom-6 right-6 z-50">
+          <button
+            onClick={() => setIsUploadOpen(true)}
+            className="w-14 h-14 rounded-full bg-linear-to-tr from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black flex items-center justify-center shadow-[0_8px_32px_rgba(245,158,11,0.4)] active:scale-90 hover:scale-105 transition-all duration-300 cursor-pointer relative group border-2 border-black"
+            aria-label="Upload Photo or Video"
+          >
+            <Camera className="w-6 h-6 stroke-2" />
+            <span className="absolute -top-10 right-0 bg-zinc-950 text-white text-[10px] font-bold tracking-widest px-2.5 py-1.5 rounded-lg border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none uppercase whitespace-nowrap shadow-xl">
+              ADD SNAPSHOT
+            </span>
+          </button>
+        </div>
+      )}
 
       {/* Bottom status badge */}
-      {tagCode && (
+      {(tagCode || (event && event.tag)) && (
         <div className="fixed bottom-6 left-6 z-40 hidden sm:block">
           <div className="glass px-3.5 py-2 rounded-full border border-white/5 shadow-2xl flex items-center gap-2 text-[10px] font-bold text-zinc-400 tracking-wider">
             <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-            NFC KEYRING DETECTED (TAG: {tagCode})
+            NFC KEYRING DETECTED ({registeredGuestName || event.tag?.guestName || tagCode || event.tag?.tagCode})
           </div>
         </div>
       )}
@@ -472,22 +549,64 @@ function EventLanding({ slug, tagCode, navigate }) {
           onClose={() => setViewerIndex(null)}
           onNewUpload={(newUpload) => setUploads(prev => [newUpload, ...prev])}
           slug={slug}
-          tagCode={tagCode}
+          tagCode={tagCode || event.tag?.tagCode}
+          showVerifiedBadge={event.showVerifiedBadge}
         />
       )}
 
       {/* Slide-up Upload Drawer */}
       <UploadDrawer
+        key={isUploadOpen ? (registeredGuestName || event.tag?.guestName || 'open') : 'closed'}
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
         slug={slug}
-        tagCode={tagCode}
+        tagCode={tagCode || event.tag?.tagCode}
+        guestName={registeredGuestName || event.tag?.guestName}
         preset={event.preset}
+        isClosed={isClosed}
         onUploadSuccess={(newUpload) => {
           setUploads(prev => [newUpload, ...prev]);
           setIsUploadOpen(false);
         }}
       />
+
+      {/* One-time Guest Name Registration modal */}
+      {showNameRegistration && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/85 backdrop-blur-md">
+          <div className="glass-premium p-8 rounded-3xl max-w-sm w-full border border-white/10 text-center select-none shadow-2xl relative">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/10 flex items-center justify-center mx-auto mb-6 text-amber-500">
+              <Camera className="w-6 h-6 stroke-[1.5]" />
+            </div>
+
+            <h2 className="text-2xl font-bold tracking-tight text-white mb-2">Welcome!</h2>
+            <p className="text-zinc-400 text-xs font-light mb-6">
+              Enter your name to register your physical memory keyring (Tag: {event.tag?.tagCode || tagCode}).
+            </p>
+
+            <form onSubmit={handleNameRegisterSubmit} className="space-y-4">
+              <div>
+                <input
+                  type="text"
+                  placeholder="Your Name (e.g. Aroha)"
+                  value={guestNameInput}
+                  onChange={(e) => setGuestNameInput(e.target.value)}
+                  className="w-full text-center py-3 px-4 rounded-xl glass-input placeholder:text-zinc-700 text-sm text-white"
+                  required
+                  maxLength={30}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={registeringName}
+                className="w-full bg-amber-500 hover:bg-amber-400 text-black font-semibold py-3 rounded-xl shadow-lg transition-all active:scale-98 disabled:opacity-50 text-sm tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {registeringName ? 'Registering...' : 'REGISTER KEYRING'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

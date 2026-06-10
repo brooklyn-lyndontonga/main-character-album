@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   X, ChevronUp, ChevronDown, User, Calendar, Tag, 
   Settings, Camera, Image as ImageIcon, RotateCw, 
   Sparkles, Check, AlertTriangle, Upload, Eye, Share2, Download 
 } from 'lucide-react';
 
-function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload, slug, tagCode }) {
+function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload, slug, tagCode, showVerifiedBadge = true }) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   
   // Gesture states
@@ -56,10 +56,12 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
   const prevIndex = (currentIndex - 1 + N) % N;
   const nextIndex = (currentIndex + 1) % N;
 
-  // Sync initial preset
-  useEffect(() => {
+  // Sync initial preset without useEffect to avoid cascading renders
+  const [prevPreset, setPrevPreset] = useState(preset);
+  if (preset !== prevPreset) {
     setLocalPreset(preset);
-  }, [preset]);
+    setPrevPreset(preset);
+  }
 
   // Clean up camera stream on unmount
   useEffect(() => {
@@ -71,7 +73,7 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
   }, []);
 
   // WebRTC camera orchestrator
-  const startCamera = async (mode = facingMode) => {
+  const startCamera = useCallback(async (mode = facingMode) => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
     }
@@ -97,27 +99,30 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
       setCameraError('Could not access device camera. Please check permissions or use the system camera fallback.');
       setCameraActive(false);
     }
-  };
+  }, [facingMode]);
 
-  const stopCamera = () => {
+  const stopCamera = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
     setCameraActive(false);
-  };
+  }, []);
 
   // Automatically start/stop camera on horizontalState changes
   useEffect(() => {
-    if (horizontalState === 'camera' && !snappedPhoto) {
-      startCamera(facingMode);
-    } else {
-      stopCamera();
-    }
-  }, [horizontalState, snappedPhoto]);
+    const timer = setTimeout(() => {
+      if (horizontalState === 'camera' && !snappedPhoto) {
+        startCamera(facingMode);
+      } else {
+        stopCamera();
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [horizontalState, snappedPhoto, facingMode, startCamera, stopCamera]);
 
   // Unified transition snapping mechanism
-  const transitionTo = (direction) => {
+  const transitionTo = useCallback((direction) => {
     if (isAnimating) return;
     const h = containerRef.current?.clientHeight || window.innerHeight;
     setIsAnimating(true);
@@ -143,7 +148,7 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
         setIsAnimating(false);
       }, 500);
     }
-  };
+  }, [isAnimating, nextIndex, prevIndex]);
 
   // Keyboard navigation shortcuts (Blocked in settings/camera panels)
   useEffect(() => {
@@ -165,7 +170,7 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, uploads.length, horizontalState]);
+  }, [currentIndex, uploads.length, horizontalState, onClose, transitionTo]);
 
   // Desktop Mouse Wheel support (with kinetic pacing)
   useEffect(() => {
@@ -198,7 +203,7 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
         container.removeEventListener('wheel', handleWheel);
       }
     };
-  }, [currentIndex, uploads.length, horizontalState]);
+  }, [currentIndex, uploads.length, horizontalState, transitionTo]);
 
   // Gesture Engine Handlers
   const handlePointerDown = (e) => {
@@ -252,7 +257,9 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
 
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch (err) {}
+    } catch {
+      // Ignore errors when pointer capture release fails
+    }
 
     const w = containerRef.current?.clientWidth || window.innerWidth;
     const h = containerRef.current?.clientHeight || window.innerHeight;
@@ -303,7 +310,9 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
     setIsDragging(false);
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch (err) {}
+    } catch {
+      // Ignore errors when pointer capture release fails
+    }
     
     // Snap back safely
     transitionTo('stay');
@@ -589,7 +598,7 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
             <div className="flex flex-wrap items-center justify-center gap-4 text-[10px] text-zinc-400 font-light">
               <span className="flex items-center gap-1.5">
                 <User className="w-3.5 h-3.5 text-amber-500 stroke-[1.5]" />
-                Uploaded by <span className="font-bold text-zinc-300">{upload.uploaderName || 'Anonymous'}</span>
+                Uploaded by <span className="font-bold text-zinc-300">{upload.tagGuestName || upload.uploaderName || 'Anonymous'}</span>
               </span>
               <span className="text-zinc-550">•</span>
               <span className="flex items-center gap-1.5">
@@ -628,7 +637,7 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
       
       const diffDays = Math.floor(diffHours / 24);
       return `${diffDays}d ago`;
-    } catch (e) {
+    } catch {
       return '';
     }
   };
@@ -819,13 +828,13 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
         ctx.textAlign = 'left';
         ctx.fillStyle = keepsakeTheme === 'sepia' ? '#b45309' : '#e4e4e7';
         ctx.font = 'bold 24px Outfit, sans-serif';
-        const nameText = `CAPTURED BY: ${currentUpload.uploaderName?.toUpperCase() || 'ANONYMOUS GUEST'}`;
+        const nameText = `CAPTURED BY: ${(currentUpload.tagGuestName || currentUpload.uploaderName || 'ANONYMOUS GUEST').toUpperCase()}`;
         ctx.fillText(nameText, 140, dividerY + 50);
 
         ctx.textAlign = 'right';
         ctx.fillStyle = keepsakeTheme === 'sepia' ? '#d97706' : '#a1a1aa';
         ctx.font = '18px monospace';
-        const dateText = `${new Date(currentUpload.createdAt).toLocaleDateString()} // ${currentUpload.tagCode ? 'NFC VERIFIED' : 'WEB contributions'}`;
+        const dateText = `${new Date(currentUpload.createdAt).toLocaleDateString()} // ${currentUpload.tagCode && showVerifiedBadge ? `NFC VERIFIED (${currentUpload.tagGuestName || currentUpload.tagCode})` : 'WEB contributions'}`;
         ctx.fillText(dateText, 1080 - 140, dividerY + 48);
 
         // 8. Render wrapped Caption Paragraph below photo
@@ -958,7 +967,7 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
           setKeepsakeProcessing(false);
         };
         fallbackImg.src = currentUpload.imageUrl;
-      } catch (fErr) {
+      } catch {
         setKeepsakeProcessing(false);
       }
     };
@@ -1055,10 +1064,10 @@ function FullscreenViewer({ uploads, preset, initialIndex, onClose, onNewUpload,
             <Sparkles className="w-3 h-3 text-amber-500 animate-spin" />
             {PRESET_LABELS[localPreset] || localPreset}
           </span>
-          {currentUpload?.tagCode && (
+          {currentUpload?.tagCode && showVerifiedBadge && (
             <span className="hidden sm:flex text-[9px] px-2 py-0.5 rounded-md border border-white/10 bg-white/5 text-zinc-400 font-bold tracking-wider items-center gap-1.5">
-              <Tag className="w-2.5 h-2.5" />
-              NFC TAG: {currentUpload.tagCode}
+              <Tag className="w-2.5 h-2.5 text-amber-500" />
+              NFC VERIFIED: {currentUpload.tagGuestName || currentUpload.tagCode}
             </span>
           )}
         </div>
