@@ -4,6 +4,8 @@
   "description": "NFC Event Album MVP Monorepo",
   "scripts": {
     "install:all": "npm install --prefix backend && npm install --prefix frontend --legacy-peer-deps",
+    "postinstall": "npm run install:all",
+    "build": "npm run build --prefix frontend && mkdir -p dist && cp -r frontend/dist/* dist/",
     "backend": "npm run dev --prefix backend",
     "frontend": "npm run dev --prefix frontend",
     "dev": "npx -y concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\""
